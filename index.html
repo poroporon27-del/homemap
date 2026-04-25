@@ -1,0 +1,2841 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <!-- グローバルエラー表示（起動時の問題を画面に表示） -->
+  <script>
+  window.onerror = function(msg, src, line, col, err) {
+    var ls = document.getElementById('loading-screen');
+    if (ls) {
+      ls.style.opacity = '1';
+      ls.style.pointerEvents = 'all';
+      ls.style.display = 'flex';
+      ls.innerHTML = '<div style="padding:24px;color:#fff;font-size:13px;word-break:break-all;max-width:360px;text-align:left;">'
+        + '<div style="font-size:20px;margin-bottom:12px;">⚠️ 起動エラー</div>'
+        + '<b>' + (msg||'').replace(/</g,'&lt;') + '</b><br><br>'
+        + 'ファイル: ' + (src||'').replace(/</g,'&lt;') + '<br>'
+        + '行: ' + (line||0) + '<br><br>'
+        + '<div style="opacity:0.8;font-size:11px;">メニュー「表示 > 開発者ツール」(F12) でコンソールを確認してください</div>'
+        + '</div>';
+    }
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function(e) {
+    console.error('Unhandled promise rejection:', e.reason);
+  });
+  </script>
+  <title>ホームマップ</title>
+  <!-- PWA manifest 除去（Capacitorネイティブアプリのため不要） -->
+  <meta name="theme-color" content="#5b67e8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ホームマップ">
+  <script>
+/* Fuse.js compatible fuzzy search - lightweight implementation */
+(function(root,factory){if(typeof define==='function'&&define.amd){define([],factory);}else if(typeof module==='object'&&module.exports){module.exports=factory();}else{root.Fuse=factory();}}(typeof self!=='undefined'?self:this,function(){
+'use strict';
+function Fuse(list,options){
+  this.list=list||[];
+  this.options=Object.assign({keys:[],threshold:0.6,includeScore:false,ignoreLocation:false,minMatchCharLength:1,distance:100,location:0,shouldSort:true,findAllMatches:false},options||{});
+}
+Fuse.prototype.search=function(pattern){
+  if(!pattern||pattern.length<(this.options.minMatchCharLength||1))return[];
+  var lp=pattern.toLowerCase(),opts=this.options,results=[],self=this;
+  for(var i=0;i<this.list.length;i++){
+    var item=this.list[i],best=1;
+    for(var k=0;k<opts.keys.length;k++){
+      var key=opts.keys[k],val=item[key];
+      if(val==null)continue;
+      var text=Array.isArray(val)?val.join(' '):String(val);
+      var s=self._score(lp,text.toLowerCase());
+      if(s<best)best=s;
+    }
+    if(best<=opts.threshold)results.push({item:item,score:best,refIndex:i});
+  }
+  if(opts.shouldSort!==false)results.sort(function(a,b){return a.score-b.score;});
+  return results;
+};
+Fuse.prototype._score=function(pattern,text){
+  if(text===pattern)return 0;
+  if(text.indexOf(pattern)!==-1)return 0.001;
+  var pi=0,gaps=0,last=-1;
+  for(var i=0;i<text.length&&pi<pattern.length;i++){
+    if(text[i]===pattern[pi]){gaps+=Math.max(0,i-last-1);last=i;pi++;}
+  }
+  if(pi<pattern.length)return 1;
+  var coverage=pattern.length/text.length;
+  var gapPenalty=gaps/(text.length*2);
+  return Math.min(0.99,Math.max(0.01,0.1+gapPenalty+(1-coverage)*0.3));
+};
+Fuse.version='7.0.0-compat';
+return Fuse;
+}));
+  </script>
+  <style>
+    :root {
+      --primary: #5b67e8;
+      --primary-light: #eef0fd;
+      --accent: #f7b731;
+      --danger: #e55353;
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --text: #1a202c;
+      --text-muted: #718096;
+      --border: #e2e8f0;
+      --shadow: 0 2px 8px rgba(0,0,0,0.10);
+      --shadow-lg: 0 8px 30px rgba(0,0,0,0.15);
+      --radius: 16px;
+      --radius-sm: 10px;
+      /* ヘッダーは2段構成のため高さを増やす */
+      --header-h: 96px;
+      --footer-h: 64px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', 'Noto Sans JP', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100%; overflow: hidden;
+      font-size: 16px;
+    }
+
+    #app { display: flex; flex-direction: column; height: 100dvh; height: 100vh; overflow: hidden;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    .screen { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+    .screen.active { display: flex; }
+
+    /* ===== HOUSES SCREEN ===== */
+    #houses-screen {
+      background: linear-gradient(160deg, #eef0fd 0%, #f0f2f5 100%);
+    }
+    .hs-header {
+      padding: 36px 24px 16px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .hs-app-logo { font-size: 48px; animation: float 3s ease-in-out infinite; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+    .hs-app-title { font-size: 24px; font-weight: 800; color: var(--primary); margin-top: 8px; }
+    .hs-app-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* トップ画面のアクションバー（使い方ボタン） */
+    .hs-action-bar {
+      display: flex;
+      justify-content: flex-end;
+      padding: 0 16px 8px;
+      flex-shrink: 0;
+      gap: 8px;
+    }
+    .hs-help-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 14px 24px;
+      border-radius: var(--radius);
+      border: 2px solid var(--primary);
+      background: var(--primary-light);
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      color: var(--primary);
+      box-shadow: var(--shadow);
+      width: 100%;
+      max-width: 360px;
+    }
+    .hs-help-btn:active { background: var(--primary-light); }
+
+    .hs-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 16px 80px; }
+    .hs-section-label { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; text-transform: uppercase; padding: 8px 4px 6px; }
+    .house-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .house-card:active { transform: scale(0.98); background: var(--bg); }
+    .hc-emoji { font-size: 36px; flex-shrink: 0; }
+    .hc-info { flex: 1; min-width: 0; }
+    .hc-name { font-size: 17px; font-weight: 700; }
+    .hc-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+    .hc-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .hc-btn { width: 32px; height: 32px; border-radius: 50%; background: var(--bg); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+    .hc-btn:active { background: var(--border); }
+    .hs-add-card {
+      background: none;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      color: var(--primary);
+      font-size: 15px;
+      font-weight: 600;
+      transition: background 0.15s;
+    }
+    .hs-add-card:active { background: var(--primary-light); }
+    .hs-empty {
+      text-align: center;
+      padding: 60px 24px 32px;
+      color: var(--text-muted);
+    }
+    .hs-empty-icon { font-size: 64px; margin-bottom: 16px; opacity: 0.6; }
+    .hs-empty-text { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .hs-empty-sub { font-size: 13px; line-height: 1.6; margin-bottom: 24px; }
+
+    /* ===== HELP SCREEN（使い方） ===== */
+    #help-screen {
+      background: var(--bg);
+    }
+    .help-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      min-height: 56px;
+    }
+    .help-back-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; color: var(--primary); flex-shrink: 0;
+    }
+    .help-title { flex: 1; font-size: 17px; font-weight: 700; }
+    .help-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px; }
+    .help-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+    }
+    .help-section-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--primary);
+    }
+    .help-section-text {
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text);
+      white-space: pre-line;
+    }
+
+    /* ===== FLOORS SCREEN ===== */
+    #floors-screen { }
+    .fs-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      min-height: 56px;
+      z-index: 10;
+    }
+    .fs-home-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: var(--primary); flex-shrink: 0;
+    }
+    .fs-back-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; color: var(--primary); flex-shrink: 0;
+    }
+    .fs-title { flex: 1; font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fs-edit-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
+    }
+    .fs-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px 16px 80px; }
+    .floor-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .floor-card:active { transform: scale(0.98); }
+    .fc-thumb {
+      width: 80px; height: 70px;
+      flex-shrink: 0;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .fc-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .fc-thumb-ph { font-size: 32px; opacity: 0.4; }
+    .fc-info { flex: 1; min-width: 0; padding: 14px 0; }
+    .fc-name { font-size: 16px; font-weight: 700; }
+    .fc-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+    .fc-fp-hint { font-size: 11px; color: var(--accent); margin-top: 3px; font-weight: 600; }
+    .fc-btn {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: none; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: var(--text-muted);
+      flex-shrink: 0; margin-right: 8px;
+    }
+    .fc-btn:active { background: var(--bg); }
+    .fs-add-card {
+      background: none;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      color: var(--primary);
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .fs-add-card:active { background: var(--primary-light); }
+    .fs-empty {
+      text-align: center;
+      padding: 40px 24px;
+      color: var(--text-muted);
+    }
+    .fs-empty-icon { font-size: 52px; margin-bottom: 12px; opacity: 0.5; }
+
+    /* ===== MAP SCREEN ===== */
+    #map-screen { position: relative; }
+
+    /* 2段ヘッダー */
+    .map-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    /* 1段目: ナビゲーション + ボタン群 */
+    .map-header-row1 {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 8px 4px;
+      min-height: 50px;
+    }
+    /* 2段目: 検索バー */
+    .map-header-row2 {
+      padding: 0 8px 6px;
+    }
+
+    .map-header-back {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: var(--bg); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0; color: var(--primary);
+    }
+    .header-back-btn { width:34px; height:34px; border-radius:50%; background:var(--bg); border:none; cursor:pointer; display:none; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+    .header-back-btn.show { display:flex; }
+
+    /* パンくずリスト — 1段目の中央付近に収める */
+    .header-breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .breadcrumb-sep { font-size:11px; color:var(--text-muted); flex-shrink:0; }
+    .breadcrumb-name { font-size:12px; font-weight:600; color:var(--primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:80px; }
+
+    /* 検索バー — 2段目で幅いっぱい */
+    .search-bar { display:flex; align-items:center; gap:8px; background:var(--bg); border-radius:24px; padding:7px 14px; border:1.5px solid transparent; transition:border-color 0.2s; }
+    .search-bar:focus-within { border-color:var(--primary); background:#fff; }
+    .search-bar input { flex:1; border:none; background:none; outline:none; font-size:14px; color:var(--text); }
+    .search-bar input::placeholder { color:var(--text-muted); }
+    .search-icon { color:var(--text-muted); font-size:15px; flex-shrink:0; }
+    .clear-search-btn { font-size:15px; cursor:pointer; color:var(--text-muted); display:none; }
+
+    /* ヘッダーアイコンボタン（右側ボタン群） */
+    .map-header-icon-btn {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: var(--bg); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; flex-shrink: 0; transition: background 0.2s;
+    }
+    .map-header-icon-btn.off { background: #fce; }
+
+    /* ===== MAP CONTAINER ===== */
+    #map-container {
+      flex:1; position:relative; overflow:hidden;
+      background:#dde3ec;
+      touch-action: none;
+    }
+
+    #floor-plan-container {
+      position:absolute; top:0; left:0;
+      transform-origin:0 0;
+    }
+    #floor-plan-img {
+      display:block;
+    }
+    #pins-layer {
+      position:absolute; top:0; left:0; width:100%; height:100%;
+      z-index:10; pointer-events:none;
+    }
+
+    .pin { position:absolute; pointer-events:none; z-index:5; }
+    .pin-inner {
+      position:absolute; top:0; left:0;
+      transform: translate(-50%, -100%);
+      pointer-events:all; cursor:pointer;
+      display:flex; flex-direction:column; align-items:center;
+    }
+    .pin-bubble {
+      width:36px; height:36px;
+      border-radius:50% 50% 50% 0;
+      transform:rotate(-45deg);
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:var(--shadow);
+      border:2.5px solid rgba(255,255,255,0.9);
+    }
+    .pin-bubble-inner { transform:rotate(45deg); font-size:16px; }
+    .pin-tip { width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent; margin-top:-3px; }
+    .pin-label { margin-top:2px; background:rgba(0,0,0,0.72); color:#fff; font-size:10px; padding:2px 6px; border-radius:8px; white-space:nowrap; max-width:80px; overflow:hidden; text-overflow:ellipsis; pointer-events:none; }
+    .pin-children-dot { position:absolute; top:-4px; right:-4px; width:14px; height:14px; border-radius:50%; background:var(--accent); border:2px solid #fff; font-size:8px; display:flex; align-items:center; justify-content:center; }
+    .pin.highlighted .pin-bubble { animation:pulse 0.8s ease-in-out 3; }
+    @keyframes pulse { 0%,100%{box-shadow:var(--shadow)} 50%{box-shadow:0 0 0 10px rgba(91,103,232,0.25)} }
+
+    /* ピン移動モード時のドラッグスタイル */
+    .pin.drag-mode .pin-inner { cursor: grab; }
+    .pin.dragging .pin-inner { cursor: grabbing; opacity: 0.8; }
+
+    #map-container.add-mode { cursor:crosshair; }
+
+    #no-floorplan { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); text-align:center; padding:24px; gap:12px; pointer-events:none; }
+    #no-floorplan .nfp-icon { font-size:60px; opacity:0.5; }
+    #no-floorplan .nfp-hint { font-size:13px; pointer-events:all; }
+    #no-floorplan .nfp-hint button { background:var(--primary); color:#fff; border:none; border-radius:20px; padding:8px 18px; font-size:13px; font-weight:600; cursor:pointer; margin-top:8px; }
+
+    #add-mode-banner { position:absolute; top:12px; left:50%; transform:translateX(-50%); background:var(--primary); color:#fff; padding:8px 20px; border-radius:24px; font-size:14px; font-weight:600; box-shadow:var(--shadow-lg); z-index:20; display:none; white-space:nowrap; pointer-events:none; }
+
+    /* ピン移動モードのバナー */
+    #drag-mode-banner { position:absolute; top:12px; left:50%; transform:translateX(-50%); background:#e67e22; color:#fff; padding:8px 20px; border-radius:24px; font-size:14px; font-weight:600; box-shadow:var(--shadow-lg); z-index:20; display:none; white-space:nowrap; pointer-events:all; cursor:pointer; }
+
+    #submap-bar { position:absolute; bottom:12px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:#fff; padding:8px 16px; border-radius:24px; font-size:13px; z-index:20; display:none; white-space:nowrap; backdrop-filter:blur(6px); max-width:90%; pointer-events:none; }
+
+    .map-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background:var(--surface); z-index:30; overflow-y:scroll; -webkit-overflow-scrolling:touch; touch-action:pan-y; overscroll-behavior:contain; display:none; }
+
+    /* 一覧パネル: map-containerの外に配置しスクロール有効 */
+    .items-list-panel {
+      display:none; flex-direction:column;
+      position:absolute; top:0; left:0; right:0; bottom:var(--footer-h);
+      background:var(--surface); z-index:30;
+      touch-action: auto;
+    }
+    .items-list-panel .items-list-header { flex-shrink:0; }
+    .items-list-panel .list-tab-bar { flex-shrink:0; position:static; }
+    .items-list-scroll {
+      flex:1; overflow-y:scroll; -webkit-overflow-scrolling:touch;
+      touch-action: pan-y;
+      overscroll-behavior: contain;
+    }
+    .search-overlay-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:13px; color:var(--text-muted); position:sticky; top:0; background:var(--surface); z-index:2; }
+    .search-item { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); cursor:pointer; }
+    .search-item:active { background:var(--bg); }
+    .search-item-thumb { width:48px; height:48px; border-radius:10px; object-fit:cover; flex-shrink:0; }
+    .search-item-thumb-ph { width:48px; height:48px; border-radius:10px; background:var(--bg); display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0; }
+    .search-item-info { flex:1; min-width:0; }
+    .search-item-name { font-size:15px; font-weight:600; }
+    .search-item-meta { font-size:12px; color:var(--text-muted); margin-top:2px; }
+    .search-item-path { font-size:11px; color:var(--primary); margin-top:2px; }
+    .search-empty { text-align:center; padding:60px 24px; color:var(--text-muted); }
+    .search-empty .se-icon { font-size:48px; margin-bottom:12px; }
+    .items-list-header { display:flex; align-items:center; justify-content:space-between; padding:16px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--surface); z-index:2; }
+    .items-list-title { font-size:17px; font-weight:700; }
+    .items-list-close { background:none; border:none; font-size:22px; cursor:pointer; color:var(--text-muted); }
+    .item-list-entry { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); cursor:pointer; }
+    .item-list-entry:active { background:var(--bg); }
+    .item-list-thumb { width:52px; height:52px; border-radius:12px; object-fit:cover; flex-shrink:0; }
+    .item-list-thumb-ph { width:52px; height:52px; border-radius:12px; background:var(--bg); display:flex; align-items:center; justify-content:center; font-size:24px; flex-shrink:0; }
+    .item-list-info { flex:1; min-width:0; }
+    .item-list-name { font-size:15px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .item-list-meta { font-size:12px; color:var(--text-muted); margin-top:2px; }
+    .thumb-has-children { position:absolute; bottom:-3px; right:-3px; background:var(--accent); border-radius:6px; padding:1px 4px; font-size:9px; font-weight:700; color:#000; border:1.5px solid #fff; }
+    .item-list-empty { text-align:center; padding:80px 24px; color:var(--text-muted); }
+
+    /* 一覧タブ切り替え */
+    .list-tab-bar { display:flex; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:52px; z-index:1; }
+    .list-tab { flex:1; padding:10px 0; text-align:center; font-size:14px; font-weight:600; color:var(--text-muted); border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; }
+    .list-tab.active { color:var(--primary); border-bottom-color:var(--primary); }
+
+    /* ツリー表示 */
+    .tree-node { border-bottom:1px solid var(--border); }
+    .tree-node-row { display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:pointer; }
+    .tree-node-row:active { background:var(--bg); }
+    .tree-toggle { width:24px; height:24px; display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--text-muted); flex-shrink:0; transition:transform 0.2s; }
+    .tree-toggle.expanded { transform:rotate(90deg); }
+    .tree-toggle.empty { visibility:hidden; }
+    .tree-node-icon { font-size:20px; flex-shrink:0; }
+    .tree-node-name { flex:1; font-size:14px; font-weight:500; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tree-node-badge { font-size:11px; color:var(--text-muted); background:var(--bg); border-radius:8px; padding:2px 8px; flex-shrink:0; }
+    .tree-children { padding-left:20px; display:none; }
+    .tree-children.open { display:block; }
+    .tree-depth-0 .tree-node-row { background:var(--surface); }
+    .tree-depth-1 .tree-node-row { background:#f0fdf4; }
+    .tree-depth-2 .tree-node-row { background:#fffbeb; }
+    .item-list-empty .ile-icon { font-size:52px; margin-bottom:12px; }
+
+    /* ===== FOOTER ===== */
+    .map-footer {
+      display:flex; align-items:center; justify-content:space-around;
+      background:var(--surface); border-top:1px solid var(--border);
+      flex-shrink:0; min-height:var(--footer-h);
+      position:relative; z-index:10;
+      padding:0 8px;
+    }
+    .footer-btn {
+      flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+      background:none; border:none; cursor:pointer; padding:6px 8px;
+      color:var(--text-muted); font-size:11px; font-weight:500;
+      border-radius:var(--radius-sm);
+    }
+    .footer-btn .fb-icon { font-size:22px; }
+    .footer-btn:active { background:var(--bg); }
+    .footer-btn.active { color:var(--primary); }
+    /* FABスロットを2つ分に拡大してFABとピン移動ボタンを並べる */
+    .footer-fab-slot { width:120px; flex-shrink:0; }
+    .fab-btn {
+      position:absolute; left:calc(50% - 36px); top:50%; transform:translateY(-50%);
+      width:56px; height:56px; border-radius:50%;
+      background:var(--primary); border:none; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      font-size:28px; box-shadow:0 4px 15px rgba(91,103,232,0.45);
+      color:white; transition:all 0.2s; z-index:11;
+    }
+    .fab-btn.add-mode { background:var(--danger); box-shadow:0 4px 15px rgba(229,83,83,0.45); }
+    .fab-btn:active { transform:translateY(-50%) scale(0.92); }
+
+    /* ピン移動ボタン（FABの右横） */
+    .pin-drag-btn {
+      position:absolute; left:calc(50% + 28px); top:50%; transform:translateY(-50%);
+      width:44px; height:44px; border-radius:50%;
+      background:var(--bg); border:2px solid var(--border); cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      font-size:20px; z-index:11; transition:all 0.2s;
+    }
+    .pin-drag-btn.drag-mode-active {
+      background:#e67e22; border-color:#e67e22; color:#fff;
+      box-shadow:0 4px 15px rgba(230,126,34,0.45);
+    }
+    .pin-drag-btn:active { transform:translateY(-50%) scale(0.92); }
+
+    /* 一覧モードのフッターボタン */
+    .footer-btn-list {
+      display:flex; align-items:center; gap:6px;
+      background:var(--primary-light); border:1px solid var(--primary);
+      color:var(--primary); font-size:14px; font-weight:600;
+      padding:10px 20px; border-radius:var(--radius-sm);
+      cursor:pointer; transition:all 0.15s;
+    }
+    .footer-btn-list:active { background:var(--primary); color:#fff; }
+    .footer-btn-list .fb-icon { font-size:18px; }
+
+    /* ===== MODALS ===== */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); backdrop-filter:blur(4px); z-index:100; display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity 0.25s; }
+    .modal-overlay.open { opacity:1; pointer-events:all; }
+    .modal-sheet { background:var(--surface); border-radius:20px 20px 0 0; width:100%; max-height:92vh; overflow-y:auto; -webkit-overflow-scrolling:touch; transform:translateY(100%); transition:transform 0.3s cubic-bezier(0.32,0.72,0,1); padding-bottom:env(safe-area-inset-bottom,16px); }
+    .modal-overlay.open .modal-sheet { transform:translateY(0); }
+    .modal-handle { width:36px; height:4px; background:var(--border); border-radius:2px; margin:12px auto 0; }
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px 12px; }
+    .modal-title { font-size:18px; font-weight:700; }
+    .modal-close { width:30px; height:30px; border-radius:50%; background:var(--bg); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:16px; color:var(--text-muted); }
+    .modal-body { padding:0 20px 20px; }
+    .form-group { margin-bottom:16px; }
+    .form-label { font-size:13px; font-weight:600; color:var(--text-muted); margin-bottom:6px; display:block; }
+    .form-input { width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:var(--radius-sm); font-size:16px; color:var(--text); outline:none; transition:border-color 0.2s; background:var(--surface); font-family:inherit; }
+    .form-input:focus { border-color:var(--primary); }
+    textarea.form-input { min-height:80px; resize:vertical; }
+    .photo-picker { border:2px dashed var(--border); border-radius:var(--radius); padding:20px; text-align:center; cursor:pointer; position:relative; overflow:hidden; }
+    .photo-picker.has-photo { border-style:solid; border-color:var(--primary); padding:0; }
+    .photo-picker img { width:100%; height:180px; object-fit:cover; border-radius:14px; display:block; }
+    .photo-picker-placeholder { color:var(--text-muted); }
+    .pp-icon { font-size:36px; margin-bottom:8px; }
+    .pp-text { font-size:14px; }
+    .photo-overlay { position:absolute; inset:0; background:rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; border-radius:14px; color:white; font-size:13px; gap:6px; }
+    #camera-input, #gallery-input, #floor-fp-input, #floor-fp-change-input { display:none; }
+    .emoji-grid { display:flex; gap:8px; flex-wrap:wrap; }
+    .emoji-chip { width:44px; height:44px; border-radius:var(--radius-sm); border:2px solid var(--border); background:var(--surface); font-size:22px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+    .emoji-chip.selected { border-color:var(--primary); background:var(--primary-light); }
+    .btn-save { display:flex; align-items:center; justify-content:center; gap:8px; background:var(--primary); color:#fff; border:none; border-radius:var(--radius); padding:15px 28px; font-size:16px; font-weight:700; cursor:pointer; width:100%; box-shadow:0 4px 15px rgba(91,103,232,0.35); margin-top:8px; }
+    .btn-save:active { transform:scale(0.98); opacity:0.9; }
+    .btn-danger { display:flex; align-items:center; justify-content:center; gap:8px; background:none; color:var(--danger); border:1.5px solid var(--danger); border-radius:var(--radius); padding:12px 24px; font-size:15px; font-weight:600; cursor:pointer; width:100%; margin-top:8px; }
+    .btn-open-submap { display:flex; align-items:center; justify-content:center; gap:8px; background:linear-gradient(135deg,#f093fb 0%,#f5a623 100%); color:#fff; border:none; border-radius:var(--radius); padding:14px 24px; font-size:15px; font-weight:700; cursor:pointer; width:100%; margin-bottom:12px; box-shadow:0 4px 15px rgba(240,147,251,0.4); }
+    .detail-photo { width:100%; height:200px; object-fit:cover; border-radius:var(--radius); margin-bottom:8px; display:block; cursor:pointer; }
+    .detail-photo-hint { font-size:12px; color:var(--primary); text-align:center; margin-bottom:14px; font-weight:500; }
+    .detail-no-photo { width:100%; height:120px; background:var(--bg); border-radius:var(--radius); margin-bottom:16px; display:flex; align-items:center; justify-content:center; font-size:48px; }
+    .detail-info-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    .info-badge { display:flex; align-items:center; gap:4px; background:var(--bg); border-radius:20px; padding:5px 12px; font-size:13px; color:var(--text-muted); }
+    .detail-desc { font-size:15px; color:var(--text); line-height:1.6; margin-bottom:16px; }
+    .detail-children-info { background:linear-gradient(135deg,#ffecd2 0%,#fcb69f 100%); border-radius:var(--radius-sm); padding:10px 14px; font-size:13px; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+    .detail-actions { display:flex; gap:10px; }
+    .detail-actions .btn-edit { flex:1; background:var(--primary-light); color:var(--primary); border:none; border-radius:var(--radius); padding:13px; font-size:15px; font-weight:600; cursor:pointer; }
+    .detail-actions .btn-del { flex:1; background:#fff5f5; color:var(--danger); border:none; border-radius:var(--radius); padding:13px; font-size:15px; font-weight:600; cursor:pointer; }
+
+    /* Action sheet (house/floor menus) */
+    .action-sheet-item { display:flex; align-items:center; gap:14px; padding:16px 20px; border-bottom:1px solid var(--border); cursor:pointer; font-size:16px; }
+    .action-sheet-item:active { background:var(--bg); }
+    .action-sheet-item.danger { color:var(--danger); }
+    .action-sheet-cancel { text-align:center; padding:16px; font-size:16px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+    .action-sheet-cancel:active { background:var(--bg); }
+
+    /* フロアモーダル内のフロアプランピッカー */
+    .fp-picker { border:2px dashed var(--border); border-radius:var(--radius); padding:16px; text-align:center; cursor:pointer; position:relative; overflow:hidden; }
+    .fp-picker.has-fp { border-style:solid; border-color:var(--primary); padding:0; }
+    .fp-picker img { width:100%; height:120px; object-fit:cover; border-radius:14px; display:block; }
+    .fp-picker-placeholder { color:var(--text-muted); }
+    .fp-overlay { position:absolute; inset:0; background:rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; border-radius:14px; color:white; font-size:13px; gap:6px; }
+
+    /* Toast */
+    #toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%) translateY(20px); background:rgba(26,32,44,0.9); color:#fff; padding:10px 20px; border-radius:24px; font-size:14px; z-index:200; opacity:0; transition:all 0.3s; pointer-events:none; white-space:nowrap; backdrop-filter:blur(4px); }
+    #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+    /* Confirm */
+    #confirm-dialog { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:300; opacity:0; pointer-events:none; transition:opacity 0.2s; }
+    #confirm-dialog.open { opacity:1; pointer-events:all; }
+    .confirm-box { background:var(--surface); border-radius:20px; padding:28px 24px; max-width:320px; width:90%; text-align:center; transform:scale(0.9); transition:transform 0.2s; }
+    #confirm-dialog.open .confirm-box { transform:scale(1); }
+    .confirm-title { font-size:17px; font-weight:700; margin-bottom:10px; }
+    .confirm-msg { font-size:14px; color:var(--text-muted); line-height:1.5; margin-bottom:24px; }
+    .confirm-actions { display:flex; gap:10px; }
+    .confirm-cancel { flex:1; background:var(--bg); border:none; border-radius:var(--radius); padding:13px; font-size:15px; font-weight:600; cursor:pointer; }
+    .confirm-ok { flex:1; background:var(--danger); color:#fff; border:none; border-radius:var(--radius); padding:13px; font-size:15px; font-weight:600; cursor:pointer; }
+    .confirm-ok.confirm-open { background:#f59e0b; }
+    .confirm-ok.confirm-new  { background:#f59e0b; }
+
+    /* Loading */
+    #loading-screen { position:fixed; inset:0; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:400; transition:opacity 0.4s; }
+    #loading-screen.hidden { opacity:0; pointer-events:none; }
+    #loading-screen.gone { display:none; }
+    .loading-icon { font-size:72px; animation:float 1.5s ease-in-out infinite; }
+    .loading-text { color:rgba(255,255,255,0.9); font-size:16px; margin-top:20px; }
+    .loading-bar { width:120px; height:3px; background:rgba(255,255,255,0.3); border-radius:3px; margin-top:16px; overflow:hidden; }
+    .loading-bar-fill { height:100%; width:0%; background:#fff; border-radius:3px; animation:loading 1.5s ease-in-out forwards; }
+    @keyframes loading { to { width:100%; } }
+    .divider { height:1px; background:var(--border); margin:8px 0; }
+    .btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:8px; background:var(--primary); color:#fff; border:none; border-radius:var(--radius); padding:14px 28px; font-size:16px; font-weight:600; cursor:pointer; width:100%; box-shadow:0 4px 15px rgba(91,103,232,0.4); }
+    .btn-primary:active { transform:scale(0.97); }
+    .btn-secondary { display:inline-flex; align-items:center; justify-content:center; gap:8px; background:var(--bg); color:var(--text); border:none; border-radius:var(--radius); padding:12px 24px; font-size:15px; font-weight:500; cursor:pointer; width:100%; margin-top:10px; }
+  </style>
+</head>
+<body>
+
+<div id="loading-screen">
+  <div class="loading-icon">🏠</div>
+  <div class="loading-text">ホームマップ 読み込み中...</div>
+  <div class="loading-bar"><div class="loading-bar-fill"></div></div>
+</div>
+
+<div id="app">
+
+<!-- ===== HOUSES SCREEN（トップ画面） ===== -->
+<div id="houses-screen" class="screen active">
+  <div class="hs-header">
+    <div class="hs-app-logo">🏠</div>
+    <div class="hs-app-title">ホームマップ</div>
+    <div class="hs-app-sub">家を選んでください</div>
+  </div>
+  <!-- 使い方ボタン（「開く」ボタンは削除） -->
+  <div class="hs-action-bar">
+    <button class="hs-help-btn" onclick="showHelpScreen()">📖 本アプリの使い方と注意事項</button>
+  </div>
+  <div class="hs-body" id="houses-list"></div>
+</div>
+
+<!-- ===== HELP SCREEN（使い方） ===== -->
+<div id="help-screen" class="screen">
+  <div class="help-header">
+    <button class="help-back-btn" onclick="showHousesScreen()">‹</button>
+    <div class="help-title">📖 ホームマップの使い方</div>
+  </div>
+  <div class="help-body">
+    <div class="help-section" style="background:#fff3cd;border:1px solid #ffc107;border-radius:10px;padding:14px;">
+      <div class="help-section-title">⚠️ iPhoneをお使いの方への重要なお知らせ</div>
+      <div class="help-section-text">このアプリのデータ（登録した物や写真など）は端末のブラウザ内に保存されます。
+
+<b>必ず「ホーム画面に追加」してご利用ください。</b>
+Safariのブックマークやリンクから使用した場合、7日間以上アクセスしないとデータが自動的に削除される場合があります。
+ホーム画面に追加すると、Safariとは別の保存領域にデータが保持されるため、この制限を受けません。また、Safariの「履歴とWebサイトデータを消去」を実行しても、ホーム画面のアプリのデータには影響しません。
+
+【ホーム画面への追加方法】
+Safariでこのページを開く → 共有ボタン（□↑）をタップ → 「ホーム画面に追加」を選択
+
+※ ホーム画面からアプリ自体を削除するとデータも消えますのでご注意ください。</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">🏠 家を登録する</div>
+      <div class="help-section-text">「＋ 家を追加」をタップして、家の名前とアイコンを設定します。
+自宅、実家、職場など複数登録できます。</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">🗺️ 間取り図を設定する</div>
+      <div class="help-section-text">階（フロア）を追加するときに間取り図の画像を設定します。
+後からヘッダーの📐ボタンで変更もできます。
+🔄ボタンで間取り図を90°ずつ回転させることもできます。</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">📍 物の場所を記録する</div>
+      <div class="help-section-text">1. マップ画面で「＋」ボタンをタップ
+2. 間取り図上の場所をタップ
+3. 名前、写真、アイコン、メモを入力して保存</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">📂 収納の中身を管理する（3階層）</div>
+      <div class="help-section-text">ピンをタップ → 写真をタップすると、その物の「中身」を管理できます。
+例：クローゼット → 2段目 → ネクタイ のように最大3階層まで管理可能。
+階層ごとに登録画面の色が変わります（紫→緑→オレンジ）。</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">✋ ピンを移動する</div>
+      <div class="help-section-text">フッターの↕️ボタンをタップするとピン移動モードになります。
+ピンをドラッグして位置を調整できます。もう一度タップで解除。</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">📦 一覧・ツリー表示</div>
+      <div class="help-section-text">フッターの「一覧」ボタンで登録した物の一覧を表示できます。
+「📋 一覧」タブ：フラットなリスト表示
+「🌳 ツリー」タブ：親子関係を階層で表示
+下部の「間取り図に戻る」で間取り図へ、「戻る」で直前に見ていた物へ戻れます。</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">🔍 物を検索する</div>
+      <div class="help-section-text">検索バーに名前を入力すると、あいまい検索で素早く見つけられます。</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">🗺️ フッターのナビゲーション</div>
+      <div class="help-section-text">「間取り図」ボタン：間取り図（ルート）に戻ります。
+「↩️ 戻る」ボタン：直前に見ていた物の詳細画面に戻ります（履歴がある場合のみ表示）。
+「＋」ボタン：物を追加するモードに切り替えます。
+「↕️」ボタン：ピン移動モードに切り替えます。
+「📦 一覧」ボタン：登録した物の一覧を表示します。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== FLOORS SCREEN（フロア一覧） ===== -->
+<div id="floors-screen" class="screen">
+  <div class="fs-header">
+    <!-- 🏠 トップ（houses-screen）へ戻るボタン -->
+    <button class="fs-home-btn" onclick="showHousesScreen()" title="トップへ戻る">🏠</button>
+    <!-- ‹ 戻るボタン（現在はhousesが1件なら不要だが汎用的に残す） -->
+    <button class="fs-back-btn" onclick="showHousesScreen()" title="家一覧へ">‹</button>
+    <div class="fs-title" id="fs-house-title"></div>
+    <button class="fs-edit-btn" onclick="openEditHouseModal(state.activeHouseId)" title="家を編集">✏️</button>
+  </div>
+  <div class="fs-body" id="floors-list"></div>
+</div>
+
+<!-- ===== MAP SCREEN（マップ） ===== -->
+<div id="map-screen" class="screen">
+
+  <!-- 2段ヘッダー -->
+  <div class="map-header">
+    <!-- 1段目: 🏠トップへ戻る / ‹戻る / パンくず / ボタン群 -->
+    <div class="map-header-row1">
+      <!-- 🏠 トップ（houses-screen）に直接戻るボタン -->
+      <button class="map-header-back" onclick="showHousesScreenFromMap()" title="トップへ戻る">🏠</button>
+      <!-- ‹ サブマップからひとつ上に戻るボタン -->
+      <button class="header-back-btn" id="header-back-btn" onclick="goBack()">‹</button>
+      <!-- パンくずリスト -->
+      <div class="header-breadcrumb" id="header-breadcrumb"></div>
+      <!-- 右側ボタン群 -->
+      <!-- ピン表示/非表示 -->
+      <button class="map-header-icon-btn" id="pins-toggle-btn" onclick="togglePins()" title="ピン表示切替">📍</button>
+      <!-- 🔄 間取り図回転ボタン -->
+      <button class="map-header-icon-btn" id="rotate-btn" onclick="rotateMap()" title="間取り図を90°回転">🔄</button>
+      <!-- 📐 間取り図変更ボタン -->
+      <button class="map-header-icon-btn" onclick="openFloorFpPicker()" title="間取り図を変更">📐</button>
+      <!-- 間取り図変更用ファイル入力（非表示） -->
+      <input type="file" id="floor-fp-change-input" accept="image/*" onchange="changeCurrentFloorFloorplan(event)" style="display:none">
+    </div>
+    <!-- 2段目: 検索バー（幅いっぱい） -->
+    <div class="map-header-row2">
+      <div class="search-bar">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="物の名前を検索…"
+               oninput="onSearchInput(this.value)" onfocus="onSearchFocus()">
+        <span class="clear-search-btn" id="clear-search" onclick="clearSearch()">✕</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="map-container">
+    <div id="floor-plan-container">
+      <img id="floor-plan-img" src="" alt="マップ" style="display:none;">
+    </div>
+    <!-- ピンレイヤー（スクリーン座標でピン配置） -->
+    <div id="pins-layer"></div>
+
+    <div id="no-floorplan" style="display:none;">
+      <div class="nfp-icon">🗺️</div>
+      <p id="no-fp-msg">間取り図がありません</p>
+      <div class="nfp-hint">
+        <button onclick="document.getElementById('floor-fp-change-input').click()">📐 間取り図を設定する</button>
+      </div>
+    </div>
+    <div id="add-mode-banner">📍 場所をタップして物を追加</div>
+    <!-- ピン移動モードのバナー（タップで解除） -->
+    <div id="drag-mode-banner" onclick="exitDragMode()">↕️ ピン移動モード — タップで解除</div>
+    <div id="submap-bar"></div>
+
+    <!-- 検索結果オーバーレイ -->
+    <div id="search-overlay" class="map-overlay">
+      <div class="search-overlay-header" id="search-result-count"></div>
+      <div id="search-results"></div>
+    </div>
+  </div>
+
+  <!-- ★ 一覧オーバーレイ: map-containerの外に配置してtouchスクロールを有効化 -->
+  <div id="items-list-overlay" class="items-list-panel">
+    <div class="items-list-header">
+      <div class="items-list-title">📦 登録された物 <span id="items-count-badge" style="font-size:14px;font-weight:400;color:var(--text-muted)"></span></div>
+      <button class="items-list-close" onclick="hideItemsList()">✕</button>
+    </div>
+    <div class="list-tab-bar">
+      <button class="list-tab active" id="tab-flat-list" onclick="switchListTab('flat')">📋 一覧</button>
+      <button class="list-tab" id="tab-tree-view" onclick="switchListTab('tree')">🌳 ツリー</button>
+    </div>
+    <div class="items-list-scroll">
+      <div id="items-list-content"></div>
+      <div id="items-tree-content" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="map-footer" id="map-footer">
+    <!-- マップモード用フッター -->
+    <div id="footer-map-mode" style="display:flex;align-items:center;justify-content:space-around;width:100%;">
+      <button class="footer-btn active" id="footer-map-btn" onclick="goToRoot()">
+        <span class="fb-icon">🗺️</span><span>間取り図</span>
+      </button>
+      <button class="footer-btn" id="footer-back-btn" onclick="goBackToLastViewed()" style="display:none;">
+        <span class="fb-icon">↩️</span><span class="fb-label">戻る</span>
+      </button>
+      <!-- FABスロット（FAB + ピン移動ボタンの2つ分） -->
+      <div class="footer-fab-slot"></div>
+      <!-- ＋ 物を追加FABボタン -->
+      <button class="fab-btn" id="fab-btn" onclick="toggleAddMode()">＋</button>
+      <!-- ↕️ ピン移動ボタン -->
+      <button class="pin-drag-btn" id="pin-drag-btn" onclick="toggleDragMode()" title="ピンを移動">↕️</button>
+      <button class="footer-btn" id="footer-list-btn" onclick="showItemsList()">
+        <span class="fb-icon">📦</span><span>一覧</span>
+      </button>
+    </div>
+    <!-- 一覧モード用フッター（間取り図に戻る＋直前の物に戻るの2ボタンのみ） -->
+    <div id="footer-list-mode" style="display:none;align-items:center;justify-content:center;gap:16px;width:100%;">
+      <button class="footer-btn-list" id="footer-tomap-btn" onclick="returnToMapFromList()">
+        <span class="fb-icon">🗺️</span><span>間取り図に戻る</span>
+      </button>
+      <button class="footer-btn-list" id="footer-lastitem-btn" onclick="returnToLastItemFromList()" style="display:none;">
+        <span class="fb-icon">↩️</span><span class="fb-label">戻る</span>
+      </button>
+    </div>
+  </div>
+</div><!-- /map-screen -->
+
+</div><!-- /app -->
+
+<!-- ===== ADD / EDIT ITEM MODAL ===== -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="add-modal-title">物を追加</div>
+      <button class="modal-close" onclick="closeAddModal()">✕</button>
+    </div>
+    <div id="add-modal-layer-badge" style="display:none; margin:0 20px 8px; padding:6px 12px; border-radius:8px; color:#fff; font-size:13px; font-weight:600; text-align:center;"></div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">📷 写真</label>
+        <div class="photo-picker" id="photo-picker" onclick="showPhotoOptions()">
+          <div class="photo-picker-placeholder"><div class="pp-icon">📸</div><div class="pp-text">タップして写真を追加</div></div>
+        </div>
+        <input type="file" id="camera-input" accept="image/*" capture="environment" onchange="onPhotoSelected(event)">
+        <input type="file" id="gallery-input" accept="image/*" onchange="onPhotoSelected(event)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">📝 名前 *</label>
+        <input type="text" class="form-input" id="item-name" placeholder="例：テレビのリモコン" maxlength="50">
+      </div>
+      <div class="form-group">
+        <label class="form-label">🎯 アイコン</label>
+        <div class="emoji-grid" id="emoji-grid">
+          <div class="emoji-chip selected" data-emoji="📦" onclick="selectEmoji(this)">📦</div>
+          <div class="emoji-chip" data-emoji="📺" onclick="selectEmoji(this)">📺</div>
+          <div class="emoji-chip" data-emoji="💻" onclick="selectEmoji(this)">💻</div>
+          <div class="emoji-chip" data-emoji="📱" onclick="selectEmoji(this)">📱</div>
+          <div class="emoji-chip" data-emoji="🎮" onclick="selectEmoji(this)">🎮</div>
+          <div class="emoji-chip" data-emoji="📚" onclick="selectEmoji(this)">📚</div>
+          <div class="emoji-chip" data-emoji="👗" onclick="selectEmoji(this)">👗</div>
+          <div class="emoji-chip" data-emoji="🔧" onclick="selectEmoji(this)">🔧</div>
+          <div class="emoji-chip" data-emoji="💊" onclick="selectEmoji(this)">💊</div>
+          <div class="emoji-chip" data-emoji="🧸" onclick="selectEmoji(this)">🧸</div>
+          <div class="emoji-chip" data-emoji="🍴" onclick="selectEmoji(this)">🍴</div>
+          <div class="emoji-chip" data-emoji="🔑" onclick="selectEmoji(this)">🔑</div>
+          <div class="emoji-chip" data-emoji="💰" onclick="selectEmoji(this)">💰</div>
+          <div class="emoji-chip" data-emoji="📄" onclick="selectEmoji(this)">📄</div>
+          <div class="emoji-chip" data-emoji="🎵" onclick="selectEmoji(this)">🎵</div>
+          <div class="emoji-chip" data-emoji="👟" onclick="selectEmoji(this)">👟</div>
+          <div class="emoji-chip" data-emoji="🧴" onclick="selectEmoji(this)">🧴</div>
+          <div class="emoji-chip" data-emoji="🔋" onclick="selectEmoji(this)">🔋</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">📋 メモ</label>
+        <textarea class="form-input" id="item-desc" placeholder="色、サイズ、補足情報など…" rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">🏷️ タグ（スペース区切り）</label>
+        <input type="text" class="form-input" id="item-tags" placeholder="例：電子機器 リモコン TV">
+      </div>
+      <button class="btn-save" onclick="saveItem()">✅ 保存する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== DETAIL MODAL ===== -->
+<div class="modal-overlay" id="detail-modal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="detail-modal-title"></div>
+      <button class="modal-close" onclick="closeDetailModal()">✕</button>
+    </div>
+    <div class="modal-body" id="detail-modal-body"></div>
+  </div>
+</div>
+
+<!-- ===== PHOTO OPTIONS ===== -->
+<div class="modal-overlay" id="photo-options-modal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-body" style="padding-top:20px;">
+      <button class="btn-primary" style="margin-bottom:10px;" onclick="openCamera()">📷 カメラで撮影</button>
+      <button class="btn-secondary" onclick="openGallery()">🖼️ アルバムから選ぶ</button>
+      <div id="remove-photo-btn" style="display:none"><div class="divider" style="margin:12px 0;"></div><button class="btn-danger" onclick="removePhoto()">🗑️ 写真を削除</button></div>
+      <div style="margin-top:12px;"><button class="btn-secondary" onclick="closePhotoOptions()">キャンセル</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== ADD/EDIT HOUSE MODAL ===== -->
+<div class="modal-overlay" id="house-modal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="house-modal-title">家を追加</div>
+      <button class="modal-close" onclick="closeHouseModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">🏡 絵文字</label>
+        <div class="emoji-grid" id="house-emoji-grid">
+          <div class="emoji-chip selected" data-emoji="🏡" onclick="selectHouseEmoji(this)">🏡</div>
+          <div class="emoji-chip" data-emoji="🏠" onclick="selectHouseEmoji(this)">🏠</div>
+          <div class="emoji-chip" data-emoji="🏢" onclick="selectHouseEmoji(this)">🏢</div>
+          <div class="emoji-chip" data-emoji="🏬" onclick="selectHouseEmoji(this)">🏬</div>
+          <div class="emoji-chip" data-emoji="🏰" onclick="selectHouseEmoji(this)">🏰</div>
+          <div class="emoji-chip" data-emoji="🏘️" onclick="selectHouseEmoji(this)">🏘️</div>
+          <div class="emoji-chip" data-emoji="🏗️" onclick="selectHouseEmoji(this)">🏗️</div>
+          <div class="emoji-chip" data-emoji="🏙️" onclick="selectHouseEmoji(this)">🏙️</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">📝 家の名前 *</label>
+        <input type="text" class="form-input" id="house-name-input" placeholder="例：自宅、実家、別荘" maxlength="30">
+      </div>
+      <button class="btn-save" onclick="saveHouse()">✅ 保存する</button>
+      <div id="house-delete-btn" style="display:none">
+        <button class="btn-danger" onclick="confirmDeleteHouse(state.editingHouseId)">🗑️ この家を削除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== ADD/EDIT FLOOR MODAL ===== -->
+<div class="modal-overlay" id="floor-modal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="floor-modal-title">階を追加</div>
+      <button class="modal-close" onclick="closeFloorModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">📝 階の名前 *</label>
+        <input type="text" class="form-input" id="floor-name-input" placeholder="例：1階、2階、地下1階" maxlength="20">
+      </div>
+      <div class="form-group">
+        <label class="form-label">📐 間取り図（任意・後から変更できます）</label>
+        <div class="fp-picker" id="fp-picker" onclick="document.getElementById('floor-fp-input').click()">
+          <div class="fp-picker-placeholder"><div class="pp-icon">🗺️</div><div class="pp-text">タップして間取り図を追加</div></div>
+        </div>
+        <input type="file" id="floor-fp-input" accept="image/*" onchange="onFloorFpSelected(event)">
+      </div>
+      <button class="btn-save" onclick="saveFloor()">✅ 保存する</button>
+      <div id="floor-delete-btn" style="display:none">
+        <button class="btn-danger" onclick="confirmDeleteFloor(state.editingFloorId)">🗑️ この階を削除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div id="confirm-dialog">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirm-title">確認</div>
+    <div class="confirm-msg" id="confirm-msg"></div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" onclick="closeConfirm()">キャンセル</button>
+      <button class="confirm-ok" id="confirm-ok-btn">削除</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// ピンカラーパレット
+// ============================================================
+const PIN_PALETTE = ['#5b67e8','#e67e22','#27ae60','#9b59b6','#e55353','#16a085','#f7b731','#2980b9','#8e44ad','#d35400'];
+function getPinColor(item) { return PIN_PALETTE[(item.id || 0) % PIN_PALETTE.length]; }
+
+// ============================================================
+// IndexedDB
+// ============================================================
+const DB_NAME = 'HomeMapDB2', DB_VERSION = 1;
+let db = null;
+
+// ============================================================
+// Capacitor モバイル環境検出
+// ============================================================
+const isCapacitor = typeof window.Capacitor !== 'undefined';
+let CapFilesystem, CapShare, CapCamera;
+if (isCapacitor && window.Capacitor.Plugins) {
+  CapFilesystem = window.Capacitor.Plugins.Filesystem;
+  CapShare = window.Capacitor.Plugins.Share;
+  CapCamera = window.Capacitor.Plugins.Camera;
+}
+
+// ============================================================
+// 現在のファイル名（モバイルではファイル名のみ管理）
+// ============================================================
+let currentFileHandle = null;
+let currentFileName = null;
+
+function initDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings');
+      if (!d.objectStoreNames.contains('items')) {
+        const st = d.createObjectStore('items', { keyPath:'id', autoIncrement:true });
+        st.createIndex('parentId','parentId',{unique:false});
+        st.createIndex('floorId','floorId',{unique:false});
+      }
+      if (!d.objectStoreNames.contains('houses')) d.createObjectStore('houses', { keyPath:'id', autoIncrement:true });
+      if (!d.objectStoreNames.contains('floors')) {
+        const fs = d.createObjectStore('floors', { keyPath:'id', autoIncrement:true });
+        fs.createIndex('houseId','houseId',{unique:false});
+      }
+    };
+    req.onsuccess = e => { db = e.target.result; res(); };
+    req.onerror = e => rej(e.target.error);
+    req.onblocked = () => rej(new Error('DB blocked'));
+  });
+}
+function dbGet(s,k){ return new Promise((r,j)=>{ const q=db.transaction(s,'readonly').objectStore(s).get(k); q.onsuccess=()=>r(q.result); q.onerror=()=>j(q.error); }); }
+function dbPut(s,k,v){ return new Promise((r,j)=>{ const q=db.transaction(s,'readwrite').objectStore(s).put(v,k); q.onsuccess=()=>r(q.result); q.onerror=()=>j(q.error); }); }
+function dbDelete(s,k){ return new Promise((r,j)=>{ const q=db.transaction(s,'readwrite').objectStore(s).delete(k); q.onsuccess=()=>r(); q.onerror=()=>j(q.error); }); }
+function dbGetAll(s){ return new Promise((r,j)=>{ const q=db.transaction(s,'readonly').objectStore(s).getAll(); q.onsuccess=()=>r(q.result); q.onerror=()=>j(q.error); }); }
+function dbAdd(s,v){ return new Promise((r,j)=>{ const q=db.transaction(s,'readwrite').objectStore(s).add(v); q.onsuccess=()=>r(q.result); q.onerror=()=>j(q.error); }); }
+function dbUpdate(s,v){ return new Promise((r,j)=>{ const q=db.transaction(s,'readwrite').objectStore(s).put(v); q.onsuccess=()=>r(q.result); q.onerror=()=>j(q.error); }); }
+function dbClear(s){ return new Promise((r,j)=>{ const q=db.transaction(s,'readwrite').objectStore(s).clear(); q.onsuccess=()=>r(); q.onerror=()=>j(q.error); }); }
+
+// ============================================================
+// アプリ状態
+// ============================================================
+const state = {
+  // 家・フロア・物
+  houses: [],
+  allFloors: [],
+  allItems: [],
+  activeHouseId: null,
+  activeFloor: null,
+
+  // 現在のフロアのアイテムセット
+  items: [],
+  floorplanData: null,
+
+  // UI
+  addMode: false,
+  dragMode: false,           // ピン移動モード
+  pendingX: null, pendingY: null,
+  editingItemId: null,
+  selectedPhotoData: null,
+  selectedEmoji: '📦',
+  showPins: true,            // グローバルで全階層共通
+  containerStack: [],        // サブマップの深さスタック（3階層以上も可能）
+
+  // 直前に見た物（一覧から戻る用）
+  lastViewedItemId: null,
+  lastViewedStack: null,
+
+  // 家・フロア編集
+  editingHouseId: null,
+  editingFloorId: null,
+  selectedHouseEmoji: '🏡',
+  selectedFloorFpData: null,
+};
+
+// ============================================================
+// マップビュー状態（ズーム・パン）
+// ============================================================
+const mv = { zoom:1, panX:0, panY:0, rotation:0 };
+
+function applyMapTransform() {
+  const fp = document.getElementById('floor-plan-container');
+  fp.style.transformOrigin = '0 0';
+  fp.style.transform = `translate(${mv.panX}px,${mv.panY}px) scale(${mv.zoom}) rotate(${mv.rotation}deg)`;
+  // ピンはスクリーン座標で再計算（ズームに依存しない一定サイズ表示）
+  updatePinPositions();
+}
+
+// ピンをスクリーン座標に配置（map-container 基準の px 値）
+// 回転対応: 画像上のローカル座標を回転してからスクリーン座標に変換
+function updatePinPositions() {
+  const img = document.getElementById('floor-plan-img');
+  if (!img || img.style.display === 'none' || !img.naturalWidth) return;
+  const iW = img.naturalWidth, iH = img.naturalHeight;
+  const rad = (mv.rotation * Math.PI) / 180;
+  const cosR = Math.cos(rad), sinR = Math.sin(rad);
+  document.querySelectorAll('#pins-layer .pin').forEach(pin => {
+    const px = parseFloat(pin.dataset.x) || 0;
+    const py = parseFloat(pin.dataset.y) || 0;
+    // 画像ローカル座標（px）
+    const lx = (px / 100) * iW;
+    const ly = (py / 100) * iH;
+    // 回転を適用してスクリーン座標へ
+    const rx = lx * cosR - ly * sinR;
+    const ry = lx * sinR + ly * cosR;
+    pin.style.left = (mv.panX + rx * mv.zoom) + 'px';
+    pin.style.top  = (mv.panY + ry * mv.zoom) + 'px';
+  });
+}
+
+function fitMap() {
+  const img = document.getElementById('floor-plan-img');
+  if (!img || img.style.display === 'none' || !img.naturalWidth) return;
+  const mc = document.getElementById('map-container');
+  const cW = mc.clientWidth, cH = mc.clientHeight;
+  const iW = img.naturalWidth, iH = img.naturalHeight;
+  img.style.width  = iW + 'px';
+  img.style.height = iH + 'px';
+  // 回転時は幅と高さが入れ替わるバウンディングボックスを計算
+  const rad = (mv.rotation * Math.PI) / 180;
+  const absC = Math.abs(Math.cos(rad)), absS = Math.abs(Math.sin(rad));
+  const bW = iW * absC + iH * absS; // 回転後のバウンディング幅
+  const bH = iW * absS + iH * absC; // 回転後のバウンディング高さ
+  mv.zoom = Math.min(cW / bW, cH / bH);
+  // 回転後の画像の左上オフセットを計算してセンタリング
+  const cosR = Math.cos(rad), sinR = Math.sin(rad);
+  // 回転後の4角の座標を求めて最小値を取得
+  const corners = [
+    { x: 0, y: 0 },
+    { x: iW * cosR, y: iW * sinR },
+    { x: -iH * sinR, y: iH * cosR },
+    { x: iW * cosR - iH * sinR, y: iW * sinR + iH * cosR }
+  ];
+  const minX = Math.min(...corners.map(c => c.x));
+  const minY = Math.min(...corners.map(c => c.y));
+  mv.panX = (cW - bW * mv.zoom) / 2 - minX * mv.zoom;
+  mv.panY = (cH - bH * mv.zoom) / 2 - minY * mv.zoom;
+  applyMapTransform();
+}
+
+function zoomAt(cx, cy, factor) {
+  const newZ = Math.max(0.2, Math.min(12, mv.zoom * factor));
+  const r = newZ / mv.zoom;
+  mv.panX = cx - r * (cx - mv.panX);
+  mv.panY = cy - r * (cy - mv.panY);
+  mv.zoom = newZ;
+  applyMapTransform();
+}
+
+// ============================================================
+// 間取り図回転（90度ずつ）
+// ============================================================
+function rotateMap() {
+  mv.rotation = (mv.rotation + 90) % 360;
+  fitMap(); // 回転後に再フィッティング
+  showToast('回転: ' + mv.rotation + '°');
+}
+
+// ============================================================
+// パン・ズーム・ピンドラッグ イベントハンドラ
+// ============================================================
+(function setupMapInteraction() {
+  // ドラッグ中のピン情報
+  let draggingPin = null;
+  let dragStartX = 0, dragStartY = 0;
+  let dragPinOrigX = 0, dragPinOrigY = 0;
+
+  let touchState = { mode:'idle', startX:0, startY:0, startPanX:0, startPanY:0, moved:false, pinchDist:0, pinchMidX:0, pinchMidY:0 };
+  let mouseState = { active:false, startX:0, startY:0, startPanX:0, startPanY:0, moved:false };
+
+  function getContainerOffset() { return document.getElementById('map-container').getBoundingClientRect(); }
+
+  // ピンのドラッグ開始判定
+  function tryStartPinDrag(clientX, clientY) {
+    if (!state.dragMode) return false;
+    const rect = getContainerOffset();
+    // タッチ座標に最も近いピンを探す
+    const pins = document.querySelectorAll('#pins-layer .pin');
+    let nearest = null, minDist = 40; // 40px以内ならドラッグ開始
+    pins.forEach(pin => {
+      const pinLeft = parseFloat(pin.style.left) || 0;
+      const pinTop  = parseFloat(pin.style.top) || 0;
+      const dist = Math.hypot(clientX - rect.left - pinLeft, clientY - rect.top - pinTop);
+      if (dist < minDist) { minDist = dist; nearest = pin; }
+    });
+    if (!nearest) return false;
+    draggingPin = nearest;
+    dragStartX = clientX;
+    dragStartY = clientY;
+    dragPinOrigX = parseFloat(draggingPin.style.left) || 0;
+    dragPinOrigY = parseFloat(draggingPin.style.top) || 0;
+    draggingPin.classList.add('dragging');
+    return true;
+  }
+
+  // ピンのドラッグ移動
+  function moveDraggingPin(clientX, clientY) {
+    if (!draggingPin) return;
+    const dx = clientX - dragStartX;
+    const dy = clientY - dragStartY;
+    const newLeft = dragPinOrigX + dx;
+    const newTop  = dragPinOrigY + dy;
+    draggingPin.style.left = newLeft + 'px';
+    draggingPin.style.top  = newTop + 'px';
+  }
+
+  // ピンのドラッグ完了 — DBに保存
+  async function finishPinDrag() {
+    if (!draggingPin) return;
+    draggingPin.classList.remove('dragging');
+    const img = document.getElementById('floor-plan-img');
+    if (img && img.naturalWidth) {
+      const iW = img.naturalWidth, iH = img.naturalHeight;
+      const newScreenX = parseFloat(draggingPin.style.left) || 0;
+      const newScreenY = parseFloat(draggingPin.style.top) || 0;
+      // スクリーン座標→回転済みローカル座標
+      const sx = (newScreenX - mv.panX) / mv.zoom;
+      const sy = (newScreenY - mv.panY) / mv.zoom;
+      // 逆回転して画像ローカル座標に戻す
+      const rad = -(mv.rotation * Math.PI) / 180;
+      const cosR = Math.cos(rad), sinR = Math.sin(rad);
+      const localX = sx * cosR - sy * sinR;
+      const localY = sx * sinR + sy * cosR;
+      // 画像上の相対パーセント座標に変換
+      const newPercX = (localX / iW) * 100;
+      const newPercY = (localY / iH) * 100;
+      // 範囲クランプ
+      const clampedX = Math.max(0, Math.min(100, newPercX));
+      const clampedY = Math.max(0, Math.min(100, newPercY));
+      // データセット更新
+      draggingPin.dataset.x = clampedX;
+      draggingPin.dataset.y = clampedY;
+      // state.items とDBを更新
+      const itemId = parseInt(draggingPin.dataset.id, 10);
+      const item = state.items.find(i => i.id === itemId);
+      if (item) {
+        item.x = clampedX;
+        item.y = clampedY;
+        await dbUpdate('items', item);
+        const aidx = state.allItems.findIndex(i => i.id === itemId);
+        if (aidx >= 0) { state.allItems[aidx].x = clampedX; state.allItems[aidx].y = clampedY; }
+      }
+    }
+    draggingPin = null;
+  }
+
+  function setup() {
+    const mc = document.getElementById('map-container');
+
+    mc.addEventListener('wheel', e => {
+      e.preventDefault();
+      const rect = getContainerOffset();
+      const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      zoomAt(cx, cy, e.deltaY < 0 ? 1.1 : 0.909);
+    }, { passive: false });
+
+    mc.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) {
+        const cx = e.touches[0].clientX, cy = e.touches[0].clientY;
+        // ピン移動モード：ドラッグ開始を試みる
+        if (state.dragMode && tryStartPinDrag(cx, cy)) {
+          touchState = { mode:'pin-drag', moved:false, startX:cx, startY:cy };
+          e.preventDefault();
+          return;
+        }
+        touchState = { mode:'single', moved:false, startX:cx, startY:cy, startPanX:mv.panX, startPanY:mv.panY };
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const rect = getContainerOffset();
+        touchState = { mode:'pinch', moved:true, pinchDist:Math.hypot(dx,dy),
+          pinchMidX:(e.touches[0].clientX+e.touches[1].clientX)/2-rect.left,
+          pinchMidY:(e.touches[0].clientY+e.touches[1].clientY)/2-rect.top };
+      }
+    }, { passive: false });
+
+    mc.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (e.touches.length === 1 && touchState.mode === 'pin-drag') {
+        moveDraggingPin(e.touches[0].clientX, e.touches[0].clientY);
+        touchState.moved = true;
+        return; // ★ ピン移動中は画像パンを完全にブロック
+      }
+      if (e.touches.length === 2 && touchState.mode === 'pinch') {
+        // ★ ピン移動モード中はピンチズームも無効
+        if (state.dragMode) return;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const rect = getContainerOffset();
+        const midX = (e.touches[0].clientX+e.touches[1].clientX)/2-rect.left;
+        const midY = (e.touches[0].clientY+e.touches[1].clientY)/2-rect.top;
+        if (touchState.pinchDist > 0) zoomAt(midX, midY, dist / touchState.pinchDist);
+        mv.panX += midX - touchState.pinchMidX;
+        mv.panY += midY - touchState.pinchMidY;
+        touchState.pinchDist = dist; touchState.pinchMidX = midX; touchState.pinchMidY = midY;
+        applyMapTransform();
+      } else if (e.touches.length === 1 && touchState.mode === 'single') {
+        // ★ ピン移動モード中はパン（画像移動）を無効化
+        if (state.dragMode) return;
+        const dx = e.touches[0].clientX - touchState.startX;
+        const dy = e.touches[0].clientY - touchState.startY;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+          touchState.moved = true;
+          if (!state.addMode) { mv.panX = touchState.startPanX + dx; mv.panY = touchState.startPanY + dy; applyMapTransform(); }
+        }
+      }
+    }, { passive: false });
+
+    mc.addEventListener('touchend', e => {
+      if (touchState.mode === 'pin-drag') {
+        finishPinDrag();
+        touchState.mode = 'idle';
+        return;
+      }
+      if (!touchState.moved && touchState.mode === 'single') {
+        if (state.addMode) handleMapTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+      }
+      touchState.mode = 'idle';
+    }, { passive: true });
+
+    mc.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      // ピン移動モード：ドラッグ開始を試みる
+      if (state.dragMode && tryStartPinDrag(e.clientX, e.clientY)) {
+        mouseState = { active:true, pinDrag:true, moved:false, startX:e.clientX, startY:e.clientY };
+        return;
+      }
+      mouseState = { active:true, pinDrag:false, moved:false, startX:e.clientX, startY:e.clientY, startPanX:mv.panX, startPanY:mv.panY };
+    });
+    window.addEventListener('mousemove', e => {
+      if (!mouseState.active) return;
+      if (mouseState.pinDrag) { moveDraggingPin(e.clientX, e.clientY); mouseState.moved = true; return; }
+      const dx = e.clientX - mouseState.startX, dy = e.clientY - mouseState.startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+        mouseState.moved = true;
+        if (!state.addMode) { mv.panX = mouseState.startPanX + dx; mv.panY = mouseState.startPanY + dy; applyMapTransform(); }
+      }
+    });
+    window.addEventListener('mouseup', e => {
+      if (mouseState.active && mouseState.pinDrag) { finishPinDrag(); mouseState.active = false; return; }
+      if (mouseState.active && !mouseState.moved && state.addMode) {
+        const rect = getContainerOffset();
+        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) handleMapTap(e.clientX, e.clientY);
+      }
+      mouseState.active = false;
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setup);
+  } else {
+    setup();
+  }
+})();
+
+function handleMapTap(clientX, clientY) {
+  const mc = document.getElementById('map-container');
+  const rect = mc.getBoundingClientRect();
+  // スクリーン座標→回転済みローカル座標
+  const sx = (clientX - rect.left - mv.panX) / mv.zoom;
+  const sy = (clientY - rect.top  - mv.panY) / mv.zoom;
+  // 逆回転して画像ローカル座標に戻す
+  const rad = -(mv.rotation * Math.PI) / 180;
+  const cosR = Math.cos(rad), sinR = Math.sin(rad);
+  const imgX = sx * cosR - sy * sinR;
+  const imgY = sx * sinR + sy * cosR;
+  const img = document.getElementById('floor-plan-img');
+  if (img.style.display !== 'none') {
+    const iW = img.offsetWidth, iH = img.offsetHeight;
+    if (imgX < 0 || imgY < 0 || imgX > iW || imgY > iH) return;
+    state.pendingX = (imgX / iW) * 100;
+    state.pendingY = (imgY / iH) * 100;
+  } else {
+    state.pendingX = ((clientX - rect.left) / rect.width) * 100;
+    state.pendingY = ((clientY - rect.top) / rect.height) * 100;
+  }
+  openAddModal();
+}
+
+window.addEventListener('resize', () => {
+  const img = document.getElementById('floor-plan-img');
+  if (img && img.style.display !== 'none' && img.naturalWidth) fitMap();
+});
+
+// ============================================================
+// ナビゲーションヘルパー
+// ============================================================
+function getCurrentContainerId() { return state.containerStack.length ? state.containerStack[state.containerStack.length-1] : null; }
+function getCurrentLevelItems() { const c = getCurrentContainerId(); return state.items.filter(i => (i.parentId !== undefined ? i.parentId : null) === c); }
+function getChildCount(id) { return state.items.filter(i => i.parentId === id).length; }
+function getItemPath(itemId) {
+  const parts = [];
+  let cur = state.items.find(i => i.id === itemId);
+  while (cur) { parts.unshift(cur.name); cur = cur.parentId != null ? state.items.find(i => i.id === cur.parentId) : null; }
+  return parts;
+}
+
+// ============================================================
+// 初期化・マイグレーション
+// ============================================================
+async function init() {
+  // キーボードショートカット（Ctrl+S など）
+  document.addEventListener('keydown', async (e) => {
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && e.key === 'S' && e.shiftKey) { e.preventDefault(); await saveProjectAs(); return; }
+    if (ctrl && e.key === 's' && e.shiftKey) { e.preventDefault(); await saveProjectAs(); return; }
+    if (ctrl && e.key === 's')               { e.preventDefault(); await saveProject();   return; }
+    if (ctrl && e.key === 'o')               { e.preventDefault(); await openProjectFile(); return; }
+    if (ctrl && e.key === 'n')               { e.preventDefault(); await newProject();     return; }
+  });
+
+  try {
+    await initDB();
+    // ---- 全データ読み込み ----
+    state.houses    = await dbGetAll('houses');
+    state.allFloors = await dbGetAll('floors');
+    state.allItems  = await dbGetAll('items');
+
+    // ---- スマートナビゲーション ----
+    if (state.houses.length === 0) {
+      showHousesScreen();
+    } else if (state.houses.length === 1) {
+      const hFloors = state.allFloors.filter(f => f.houseId === state.houses[0].id);
+      if (hFloors.length === 1) {
+        state.activeHouseId = state.houses[0].id;
+        await showFloorMap(hFloors[0].id);
+      } else {
+        showFloorsScreen(state.houses[0].id);
+      }
+    } else {
+      showHousesScreen();
+    }
+  } catch(e) {
+    console.error('Init error:', e);
+    try { showHousesScreen(); } catch(e2) { console.error(e2); }
+  } finally {
+    const hideLoading = () => {
+      const ls = document.getElementById('loading-screen');
+      if (!ls) return;
+      ls.classList.add('hidden');
+      ls.addEventListener('transitionend', () => ls.classList.add('gone'), { once: true });
+      setTimeout(() => ls.classList.add('gone'), 600);
+    };
+    setTimeout(hideLoading, 600);
+  }
+}
+
+// ============================================================
+// HOUSES SCREEN
+// ============================================================
+function showHousesScreen() {
+  state.activeHouseId = null;
+  state.activeFloor = null;
+  state.items = [];
+  switchScreen('houses-screen');
+  renderHousesList();
+}
+
+function showHelpScreen() {
+  switchScreen('help-screen');
+}
+
+function renderHousesList() {
+  const container = document.getElementById('houses-list');
+  if (!state.houses.length) {
+    container.innerHTML = `
+      <div class="hs-empty">
+        <div class="hs-empty-icon">🏠</div>
+        <div class="hs-empty-text">まだ家が登録されていません</div>
+        <div class="hs-empty-sub">下のボタンから最初の家を追加しましょう。<br>家ごとに名前を付けて管理できます。</div>
+        <button class="btn-primary" style="max-width:260px;" onclick="openAddHouseModal()">🏡 最初の家を追加する</button>
+      </div>`;
+    return;
+  }
+  let html = `<div class="hs-section-label">登録された家 (${state.houses.length}件)</div>`;
+  state.houses.forEach(house => {
+    const floorCount = state.allFloors.filter(f => f.houseId === house.id).length;
+    const floorIds = state.allFloors.filter(f => f.houseId === house.id).map(f => f.id);
+    const itemCount = state.allItems.filter(i => floorIds.includes(i.floorId) && !i.parentId).length;
+    html += `
+      <div class="house-card" onclick="showFloorsScreen(${house.id})">
+        <div class="hc-emoji">${house.emoji||'🏡'}</div>
+        <div class="hc-info">
+          <div class="hc-name">${escHtml(house.name)}</div>
+          <div class="hc-meta">${floorCount}フロア &nbsp;|&nbsp; ${itemCount}件の物</div>
+        </div>
+        <div class="hc-actions">
+          <button class="hc-btn" onclick="event.stopPropagation();openEditHouseModal(${house.id})" title="編集">✏️</button>
+        </div>
+        <div style="color:var(--text-muted);font-size:18px;margin-left:4px;">›</div>
+      </div>`;
+  });
+  html += `<div class="hs-add-card" onclick="openAddHouseModal()"><span>＋</span><span>家を追加</span></div>`;
+  container.innerHTML = html;
+}
+
+// ============================================================
+// FLOORS SCREEN
+// ============================================================
+async function showFloorsScreen(houseId) {
+  state.activeHouseId = houseId;
+  state.allFloors = await dbGetAll('floors');
+  switchScreen('floors-screen');
+
+  const house = state.houses.find(h => h.id === houseId);
+  document.getElementById('fs-house-title').textContent = (house?.emoji||'🏡') + ' ' + (house?.name||'');
+  renderFloorsList();
+}
+
+function renderFloorsList() {
+  const container = document.getElementById('floors-list');
+  const floors = state.allFloors.filter(f => f.houseId === state.activeHouseId).sort((a,b) => a.order - b.order);
+
+  if (!floors.length) {
+    container.innerHTML = `
+      <div class="fs-empty">
+        <div class="fs-empty-icon">🏠</div>
+        <div>まだ階が登録されていません</div>
+        <div style="font-size:12px;margin-top:8px;">下のボタンから階（フロア）を追加しましょう</div>
+      </div>
+      <div class="fs-add-card" onclick="openAddFloorModal()"><span>＋</span><span>階を追加</span></div>`;
+    return;
+  }
+  let html = '';
+  floors.forEach(floor => {
+    const itemCount = state.allItems.filter(i => i.floorId === floor.id && !i.parentId).length;
+    const hasFp = !!floor.floorplan;
+    const thumb = hasFp
+      ? `<img src="${floor.floorplan}" alt="間取り図">`
+      : `<div class="fc-thumb-ph">🗺️</div>`;
+    const fpHint = hasFp ? '' : `<div class="fc-fp-hint">⚠ 間取り図未設定</div>`;
+    html += `
+      <div class="floor-card">
+        <div class="fc-thumb" onclick="showFloorMap(${floor.id})">${thumb}</div>
+        <div class="fc-info" onclick="showFloorMap(${floor.id})">
+          <div class="fc-name">${escHtml(floor.name)}</div>
+          <div class="fc-meta">${itemCount}件の物</div>
+          ${fpHint}
+        </div>
+        <button class="fc-btn" onclick="openEditFloorModal(${floor.id})" title="編集">⋮</button>
+      </div>`;
+  });
+  html += `<div class="fs-add-card" onclick="openAddFloorModal()"><span>＋</span><span>階を追加</span></div>`;
+  container.innerHTML = html;
+}
+
+// ============================================================
+// MAP SCREEN（フロアエントリ）
+// ============================================================
+async function showFloorMap(floorId) {
+  state.allFloors = await dbGetAll('floors');
+  const floor = state.allFloors.find(f => f.id === floorId);
+  if (!floor) return;
+
+  state.activeFloor = floor;
+  state.floorplanData = floor.floorplan;
+
+  // このフロアのアイテムを読み込む
+  state.allItems = await dbGetAll('items');
+  state.items = state.allItems.filter(i => i.floorId === floorId);
+
+  // containerStackをリセット（ルート階層から開始）
+  state.containerStack = [];
+  mv.rotation = 0; // フロア切替時に回転リセット
+  exitAddMode();
+  exitDragMode();
+
+  switchScreen('map-screen');
+  updateMapView();
+}
+
+// マップ画面からトップ（houses-screen）へ直接戻る
+function showHousesScreenFromMap() {
+  exitAddMode();
+  exitDragMode();
+  hideAllOverlays();
+  showHousesScreen();
+}
+
+// マップ画面からフロア一覧へ戻る（旧showFloorsScreenFromMap - 🏡ボタン相当）
+function showFloorsScreenFromMap() {
+  exitAddMode();
+  exitDragMode();
+  hideAllOverlays();
+  if (state.activeHouseId) showFloorsScreen(state.activeHouseId);
+  else showHousesScreen();
+}
+
+function switchScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function updateMapView() {
+  const cid = getCurrentContainerId();
+  const img = document.getElementById('floor-plan-img');
+  const noFp = document.getElementById('no-floorplan');
+
+  const setImg = (src) => {
+    img.style.width = ''; img.style.height = '';
+    img.src = src; img.style.display = 'block';
+    noFp.style.display = 'none';
+    img.onload = () => fitMap();
+  };
+
+  if (cid !== null) {
+    // サブマップ表示（containerStack の深さに制限なし — 3階層以上も可能）
+    const container = state.items.find(i => i.id === cid);
+    if (container && container.photo) {
+      setImg(container.photo);
+    } else {
+      img.style.display = 'none'; noFp.style.display = 'flex';
+      document.getElementById('no-fp-msg').textContent = '写真がないためマップを表示できません';
+    }
+    document.getElementById('submap-bar').style.display = 'block';
+    document.getElementById('submap-bar').textContent = `📍 ${container ? container.name : ''} の中に追加できます`;
+  } else {
+    if (state.floorplanData) {
+      setImg(state.floorplanData);
+    } else {
+      img.style.display = 'none'; noFp.style.display = 'flex';
+      document.getElementById('no-fp-msg').textContent = '間取り図が設定されていません';
+    }
+    document.getElementById('submap-bar').style.display = 'none';
+  }
+  // 回転ボタン: 間取り図（Lay1）のみ表示
+  const rotBtn = document.getElementById('rotate-btn');
+  if (rotBtn) rotBtn.style.display = (cid === null) ? '' : 'none';
+
+  updateHeaderBreadcrumb();
+  renderPins();
+  updateBackButton();
+}
+
+function updateHeaderBreadcrumb() {
+  const backBtn = document.getElementById('header-back-btn');
+  const bc = document.getElementById('header-breadcrumb');
+  const floorName = state.activeFloor ? state.activeFloor.name : '';
+
+  if (state.containerStack.length === 0) {
+    backBtn.classList.remove('show');
+    // フロア名をクリックするとフロア一覧へ
+    bc.innerHTML = `<span class="breadcrumb-name" onclick="showFloorsScreenFromMap()" style="cursor:pointer">${escHtml(floorName)}</span>`;
+  } else {
+    backBtn.classList.add('show');
+    let html = `<span class="breadcrumb-name" onclick="goToRoot()" style="cursor:pointer">${escHtml(floorName)}</span>`;
+    state.containerStack.forEach((cid, i) => {
+      const it = state.items.find(x => x.id === cid);
+      if (!it) return;
+      html += `<span class="breadcrumb-sep">›</span>`;
+      if (i < state.containerStack.length - 1)
+        html += `<span class="breadcrumb-name" onclick="goToDepth(${i})" style="cursor:pointer">${escHtml(it.name)}</span>`;
+      else
+        html += `<span class="breadcrumb-name">${escHtml(it.name)}</span>`;
+    });
+    bc.innerHTML = html;
+  }
+}
+
+// ============================================================
+// サブマップナビゲーション（最大3階層: Lay1→Lay2→Lay3）
+// containerStack.length === 0 → Lay1（間取り図）
+// containerStack.length === 1 → Lay2（物の中身）
+// containerStack.length === 2 → Lay3（物の中身の中身）— これが最深
+// ============================================================
+function getCurrentDepth() { return state.containerStack.length; }
+
+function openSubMap(itemId) {
+  const item = state.items.find(i => i.id === itemId);
+  if (!item || !item.photo) { showToast('写真を登録すると中身を管理できます'); return; }
+  // ★ Lay3（depth=2）が最深 — それ以上は開けない
+  if (state.containerStack.length >= 2) {
+    showToast('これ以上深い階層には登録できません（最大3階層）');
+    return;
+  }
+  closeDetailModal(); hideAllOverlays();
+  state.containerStack.push(itemId);
+  updateMapView();
+}
+function goBack() { if (state.containerStack.length) { state.containerStack.pop(); exitAddMode(); hideAllOverlays(); updateMapView(); } }
+function goToRoot() { state.containerStack = []; exitAddMode(); hideAllOverlays(); updateMapView(); }
+function goToDepth(d) { state.containerStack = state.containerStack.slice(0, d+1); exitAddMode(); hideAllOverlays(); updateMapView(); }
+
+// ============================================================
+// 間取り図の変更（現在のフロア）
+// ============================================================
+async function changeCurrentFloorFloorplan(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = async ev => {
+    if (!state.activeFloor) return;
+    const updated = { ...state.activeFloor, floorplan: ev.target.result };
+    await dbUpdate('floors', updated);
+    state.activeFloor = updated;
+    state.floorplanData = updated.floorplan;
+    const idx = state.allFloors.findIndex(fl => fl.id === updated.id);
+    if (idx >= 0) state.allFloors[idx] = updated;
+    if (state.containerStack.length === 0) updateMapView();
+    showToast('間取り図を更新しました！');
+  };
+  r.readAsDataURL(f);
+  e.target.value = '';
+}
+
+// ============================================================
+// ピンの描画
+// ============================================================
+function renderPins() {
+  const layer = document.getElementById('pins-layer');
+  layer.innerHTML = '';
+  if (!state.showPins) return;
+  getCurrentLevelItems().forEach(item => layer.appendChild(createPinElement(item)));
+  updatePinPositions();
+  // ピン移動モードのスタイル更新
+  if (state.dragMode) {
+    document.querySelectorAll('#pins-layer .pin').forEach(p => p.classList.add('drag-mode'));
+  }
+}
+
+function createPinElement(item) {
+  const pin = document.createElement('div');
+  pin.className = 'pin'; pin.dataset.id = item.id;
+  pin.dataset.x = item.x; pin.dataset.y = item.y;
+  const color = getPinColor(item);
+  const childCount = getChildCount(item.id);
+  const childDot = childCount > 0 ? `<div class="pin-children-dot">📂</div>` : '';
+  const inner = document.createElement('div');
+  inner.className = 'pin-inner';
+  inner.innerHTML = `
+    <div style="position:relative;">
+      <div class="pin-bubble" style="background:${color};">
+        <span class="pin-bubble-inner">${item.emoji||'📦'}</span>
+      </div>
+      ${childDot}
+    </div>
+    <div class="pin-tip" style="border-top:8px solid ${color};"></div>
+    <div class="pin-label">${escHtml(item.name)}</div>`;
+  // ピン移動モードでなければタップでディテール表示
+  inner.addEventListener('click', e => {
+    e.stopPropagation();
+    if (!state.addMode && !state.dragMode) showItemDetail(item.id);
+  });
+  pin.appendChild(inner);
+  return pin;
+}
+
+function togglePins() {
+  state.showPins = !state.showPins;
+  renderPins();
+  const btn = document.getElementById('pins-toggle-btn');
+  if (state.showPins) { btn.textContent = '📍'; btn.classList.remove('off'); showToast('ピンを表示しています'); }
+  else { btn.textContent = '🚫'; btn.classList.add('off'); showToast('ピンを非表示にしました'); }
+}
+
+// ============================================================
+// ピン移動モード
+// ============================================================
+function toggleDragMode() {
+  if (state.dragMode) exitDragMode();
+  else enterDragMode();
+}
+
+function enterDragMode() {
+  state.dragMode = true;
+  exitAddMode(); // 追加モードと排他
+  const btn = document.getElementById('pin-drag-btn');
+  const banner = document.getElementById('drag-mode-banner');
+  if (btn) btn.classList.add('drag-mode-active');
+  if (banner) banner.style.display = 'block';
+  // ピンにdrag-modeクラスを付与
+  document.querySelectorAll('#pins-layer .pin').forEach(p => p.classList.add('drag-mode'));
+  showToast('ピン移動モード: ピンをドラッグして移動できます');
+}
+
+function exitDragMode() {
+  state.dragMode = false;
+  const btn = document.getElementById('pin-drag-btn');
+  const banner = document.getElementById('drag-mode-banner');
+  if (btn) btn.classList.remove('drag-mode-active');
+  if (banner) banner.style.display = 'none';
+  document.querySelectorAll('#pins-layer .pin').forEach(p => p.classList.remove('drag-mode', 'dragging'));
+}
+
+// ============================================================
+// 追加モード
+// ============================================================
+function toggleAddMode() {
+  state.addMode = !state.addMode;
+  const btn = document.getElementById('fab-btn');
+  const banner = document.getElementById('add-mode-banner');
+  const mc = document.getElementById('map-container');
+  if (state.addMode) {
+    exitDragMode(); // ピン移動モードと排他
+    hideAllOverlays();
+    btn.textContent = '✕'; btn.classList.add('add-mode');
+    banner.style.display = 'block'; mc.classList.add('add-mode');
+  } else {
+    btn.textContent = '＋'; btn.classList.remove('add-mode');
+    banner.style.display = 'none'; mc.classList.remove('add-mode');
+  }
+}
+function exitAddMode() {
+  state.addMode = false;
+  const btn = document.getElementById('fab-btn');
+  if (btn) { btn.textContent = '＋'; btn.classList.remove('add-mode'); }
+  const banner = document.getElementById('add-mode-banner');
+  if (banner) banner.style.display = 'none';
+  const mc = document.getElementById('map-container');
+  if (mc) mc.classList.remove('add-mode');
+}
+
+// ============================================================
+// アイテム追加・編集モーダル
+// ============================================================
+function openAddModal(editItem = null) {
+  state.editingItemId = editItem ? editItem.id : null;
+
+  // ★ 階層ごとに登録画面の見た目を変える
+  const depth = getCurrentDepth(); // 0=Lay1, 1=Lay2, 2=Lay3
+  const titleEl = document.getElementById('add-modal-title');
+  const modal = document.getElementById('add-modal');
+  const sheet = modal.querySelector('.modal-sheet');
+  const layerBadge = document.getElementById('add-modal-layer-badge');
+
+  // 階層情報のバッジを設定
+  let badgeText = '';
+  let badgeColor = '';
+  let titleText = editItem ? '物を編集' : '物を追加';
+  // モーダルシートのボーダー色をリセット
+  sheet.style.borderTop = '';
+
+  if (depth === 0) {
+    // Lay1: 間取り図上 — デフォルト（紫）
+    badgeText = '📍 間取り図に配置';
+    badgeColor = 'var(--primary)';
+    sheet.style.borderTop = '4px solid var(--primary)';
+  } else if (depth === 1) {
+    // Lay2: 物の中 — 緑色系
+    const parentItem = state.items.find(i => i.id === getCurrentContainerId()) || state.allItems.find(i => i.id === getCurrentContainerId());
+    const parentName = parentItem ? parentItem.name : '物';
+    badgeText = '📦 「' + parentName + '」の中に登録';
+    badgeColor = '#10b981';
+    sheet.style.borderTop = '4px solid #10b981';
+    if (!editItem) titleText = '中身を追加';
+  } else if (depth === 2) {
+    // Lay3: 最深層 — オレンジ色系
+    const parentItem = state.items.find(i => i.id === getCurrentContainerId()) || state.allItems.find(i => i.id === getCurrentContainerId());
+    const parentName = parentItem ? parentItem.name : '物';
+    badgeText = '🔖 「' + parentName + '」の中（最深層）';
+    badgeColor = '#f59e0b';
+    sheet.style.borderTop = '4px solid #f59e0b';
+    if (!editItem) titleText = '中身を追加（最深層）';
+  }
+
+  titleEl.textContent = titleText;
+
+  // バッジ要素を更新（なければ作成）
+  if (layerBadge) {
+    layerBadge.textContent = badgeText;
+    layerBadge.style.background = badgeColor;
+    layerBadge.style.display = 'block';
+  }
+
+  document.getElementById('item-name').value = editItem ? editItem.name : '';
+  document.getElementById('item-desc').value = editItem ? (editItem.description||'') : '';
+  document.getElementById('item-tags').value = editItem ? (editItem.tags||[]).join(' ') : '';
+  state.selectedEmoji = editItem ? (editItem.emoji||'📦') : '📦';
+  document.querySelectorAll('#emoji-grid .emoji-chip').forEach(c => c.classList.toggle('selected', c.dataset.emoji === state.selectedEmoji));
+  state.selectedPhotoData = editItem ? (editItem.photo||null) : null;
+
+  // Lay3ではサブマップ不可なので写真ラベルを変える
+  const photoLabel = modal.querySelector('.form-label');
+  if (photoLabel && photoLabel.textContent.includes('写真')) {
+    if (depth >= 2) {
+      photoLabel.textContent = '📷 写真（記録用）';
+    } else {
+      photoLabel.textContent = '📷 写真';
+    }
+  }
+
+  refreshPhotoPicker();
+  modal.classList.add('open');
+  setTimeout(() => document.getElementById('item-name').focus(), 350);
+}
+function closeAddModal() { document.getElementById('add-modal').classList.remove('open'); exitAddMode(); }
+function selectEmoji(el) {
+  state.selectedEmoji = el.dataset.emoji;
+  document.querySelectorAll('#emoji-grid .emoji-chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+async function saveItem() {
+  const name = document.getElementById('item-name').value.trim();
+  if (!name) { showToast('名前を入力してください'); return; }
+  const tags = document.getElementById('item-tags').value.trim().split(/\s+/).filter(t => t);
+  const data = { name, description:document.getElementById('item-desc').value.trim(), emoji:state.selectedEmoji, photo:state.selectedPhotoData, tags, updatedAt:new Date().toISOString() };
+  if (state.editingItemId !== null) {
+    const ex = state.items.find(i => i.id === state.editingItemId);
+    const up = { ...ex, ...data };
+    await dbUpdate('items', up);
+    const idx = state.items.findIndex(i => i.id === state.editingItemId);
+    if (idx >= 0) state.items[idx] = up;
+    const aidx = state.allItems.findIndex(i => i.id === state.editingItemId);
+    if (aidx >= 0) state.allItems[aidx] = up;
+    showToast('更新しました！');
+  } else {
+    data.floorId = state.activeFloor ? state.activeFloor.id : null;
+    data.parentId = getCurrentContainerId();
+    data.x = state.pendingX !== null ? state.pendingX : 50;
+    data.y = state.pendingY !== null ? state.pendingY : 50;
+    data.createdAt = new Date().toISOString();
+    const id = await dbAdd('items', data); data.id = id;
+    state.items.push(data);
+    state.allItems.push(data);
+    showToast('追加しました！');
+  }
+  state.pendingX = state.pendingY = null;
+  closeAddModal(); renderPins();
+}
+
+// ============================================================
+// 写真（アイテム）
+// ============================================================
+function showPhotoOptions() { document.getElementById('remove-photo-btn').style.display = state.selectedPhotoData ? 'block' : 'none'; document.getElementById('photo-options-modal').classList.add('open'); }
+function closePhotoOptions() { document.getElementById('photo-options-modal').classList.remove('open'); }
+
+// カメラ撮影 — Capacitor Camera プラグインを使用
+async function openCamera() {
+  closePhotoOptions();
+  if (CapCamera) {
+    try {
+      const photo = await CapCamera.getPhoto({
+        resultType: 'dataUrl',
+        source: 'CAMERA',
+        quality: 82,
+        width: 1200,
+        height: 900,
+        allowEditing: false
+      });
+      if (photo && photo.dataUrl) {
+        state.selectedPhotoData = photo.dataUrl;
+        refreshPhotoPicker();
+      }
+    } catch(e) {
+      if (e.message && !e.message.includes('cancel')) {
+        console.error('Camera error:', e);
+        showToast('カメラを起動できませんでした');
+      }
+    }
+  } else {
+    document.getElementById('camera-input').click();
+  }
+}
+
+// アルバムから選ぶ — Capacitor Camera プラグインを使用
+async function openGallery() {
+  closePhotoOptions();
+  if (CapCamera) {
+    try {
+      const photo = await CapCamera.getPhoto({
+        resultType: 'dataUrl',
+        source: 'PHOTOS',
+        quality: 82,
+        width: 1200,
+        height: 900,
+        allowEditing: false
+      });
+      if (photo && photo.dataUrl) {
+        state.selectedPhotoData = photo.dataUrl;
+        refreshPhotoPicker();
+      }
+    } catch(e) {
+      if (e.message && !e.message.includes('cancel')) {
+        console.error('Gallery error:', e);
+        showToast('写真を選択できませんでした');
+      }
+    }
+  } else {
+    document.getElementById('gallery-input').click();
+  }
+}
+function removePhoto() { state.selectedPhotoData = null; refreshPhotoPicker(); closePhotoOptions(); }
+function onPhotoSelected(e) {
+  const f = e.target.files[0]; if (!f) return;
+  resizeImage(f, 1200, 900, d => { state.selectedPhotoData = d; refreshPhotoPicker(); e.target.value = ''; });
+}
+function resizeImage(file, mw, mh, cb) {
+  const r = new FileReader();
+  r.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      const ratio = Math.min(mw/w, mh/h, 1);
+      w = Math.floor(w*ratio); h = Math.floor(h*ratio);
+      const c = document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      cb(c.toDataURL('image/jpeg', 0.82));
+    };
+    img.src = ev.target.result;
+  };
+  r.readAsDataURL(file);
+}
+function refreshPhotoPicker() {
+  const p = document.getElementById('photo-picker');
+  if (state.selectedPhotoData) {
+    p.classList.add('has-photo');
+    p.innerHTML = `<img src="${state.selectedPhotoData}" alt="写真"><div class="photo-overlay">📷 タップして変更</div>`;
+  } else {
+    p.classList.remove('has-photo');
+    p.innerHTML = `<div class="photo-picker-placeholder"><div class="pp-icon">📸</div><div class="pp-text">タップして写真を追加</div></div>`;
+  }
+}
+
+// ============================================================
+// アイテム詳細
+// ============================================================
+function showItemDetail(itemId) {
+  const item = state.items.find(i => i.id === itemId); if (!item) return;
+  // ★ 直前に見た物を記録
+  state.lastViewedItemId = itemId;
+  state.lastViewedStack = [...state.containerStack];
+  const childCount = getChildCount(itemId);
+  const tagsHtml = (item.tags||[]).length ? `<div class="info-badge">🏷️ ${escHtml(item.tags.join(' '))}</div>` : '';
+  const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ja-JP') : '';
+  const path = item.parentId != null ? getItemPath(itemId) : null;
+  const pathHtml = path && path.length > 1 ? `<div class="info-badge" style="font-size:11px;">📍 ${escHtml(path.slice(0,-1).join(' › '))}</div>` : '';
+  let photoHtml = '';
+  // ★ Lay3（containerStack.length >= 2）ではサブマップ機能を非表示
+  const canGoDeeper = state.containerStack.length < 2;
+  if (item.photo && canGoDeeper) {
+    photoHtml = `<img src="${item.photo}" class="detail-photo" onclick="openSubMap(${itemId})" title="タップして中身を管理"><div class="detail-photo-hint">👆 写真をタップ → 中身の物を登録・管理</div>`;
+  } else if (item.photo) {
+    photoHtml = `<img src="${item.photo}" class="detail-photo" style="cursor:default;"><div class="detail-photo-hint" style="color:var(--text-muted);">📷 最深層のため、これ以上中には登録できません</div>`;
+  } else {
+    photoHtml = `<div class="detail-no-photo">${item.emoji||'📦'}</div>`;
+  }
+  const childrenInfo = (childCount > 0 && canGoDeeper) ? `<div class="detail-children-info">📂 中身：${childCount}件登録済み <span style="margin-left:auto;cursor:pointer;font-weight:600;" onclick="openSubMap(${itemId})">開く →</span></div>` : (childCount > 0 ? `<div class="detail-children-info">📂 中身：${childCount}件登録済み</div>` : '');
+  document.getElementById('detail-modal-title').textContent = (item.emoji||'📦') + ' ' + item.name;
+  // サブマップボタンは深層制限内のみ表示
+  const submapBtn = canGoDeeper ? `<button class="btn-open-submap" onclick="openSubMap(${itemId})">📂 中身の物を登録・確認する</button>` : '';
+  document.getElementById('detail-modal-body').innerHTML = `
+    ${photoHtml}
+    ${childrenInfo}
+    <div class="detail-info-row">${tagsHtml}${pathHtml}${dateStr ? `<div class="info-badge">📅 ${dateStr}</div>` : ''}</div>
+    ${item.description ? `<div class="detail-desc">${escHtml(item.description)}</div>` : ''}
+    ${submapBtn}
+    <div class="detail-actions">
+      <button class="btn-edit" onclick="editItem(${itemId})">✏️ 編集</button>
+      <button class="btn-del" onclick="confirmDeleteItem(${itemId})">🗑️ 削除</button>
+    </div>`;
+  document.getElementById('detail-modal').classList.add('open');
+  document.querySelectorAll('.pin').forEach(p => p.classList.remove('highlighted'));
+  const pin = document.querySelector(`.pin[data-id="${itemId}"]`);
+  if (pin) pin.classList.add('highlighted');
+}
+function closeDetailModal() { document.getElementById('detail-modal').classList.remove('open'); document.querySelectorAll('.pin').forEach(p => p.classList.remove('highlighted')); }
+function editItem(id) { closeDetailModal(); const it = state.items.find(i => i.id === id); if (it) openAddModal(it); }
+function confirmDeleteItem(id) {
+  const cc = getChildCount(id);
+  showConfirm('この物を削除しますか？', cc > 0 ? `中に${cc}件の登録も全て削除されます。元に戻せません。` : '元に戻せません。', async () => {
+    await deleteItemRec(id); closeDetailModal(); renderPins(); showToast('削除しました');
+  });
+}
+async function deleteItemRec(id) {
+  for (const c of state.items.filter(i => i.parentId === id)) await deleteItemRec(c.id);
+  await dbDelete('items', id);
+  state.items = state.items.filter(i => i.id !== id);
+  state.allItems = state.allItems.filter(i => i.id !== id);
+}
+
+// ============================================================
+// 家の管理
+// ============================================================
+function openAddHouseModal() {
+  state.editingHouseId = null;
+  document.getElementById('house-modal-title').textContent = '家を追加';
+  document.getElementById('house-name-input').value = '';
+  state.selectedHouseEmoji = '🏡';
+  refreshHouseEmojiGrid();
+  document.getElementById('house-delete-btn').style.display = 'none';
+  document.getElementById('house-modal').classList.add('open');
+  setTimeout(() => document.getElementById('house-name-input').focus(), 350);
+}
+function openEditHouseModal(houseId) {
+  const house = state.houses.find(h => h.id === houseId); if (!house) return;
+  state.editingHouseId = houseId;
+  document.getElementById('house-modal-title').textContent = '家を編集';
+  document.getElementById('house-name-input').value = house.name;
+  state.selectedHouseEmoji = house.emoji || '🏡';
+  refreshHouseEmojiGrid();
+  document.getElementById('house-delete-btn').style.display = 'block';
+  document.getElementById('house-modal').classList.add('open');
+  setTimeout(() => document.getElementById('house-name-input').focus(), 350);
+}
+function closeHouseModal() { document.getElementById('house-modal').classList.remove('open'); }
+function selectHouseEmoji(el) {
+  state.selectedHouseEmoji = el.dataset.emoji;
+  refreshHouseEmojiGrid();
+}
+function refreshHouseEmojiGrid() {
+  document.querySelectorAll('#house-emoji-grid .emoji-chip').forEach(c => c.classList.toggle('selected', c.dataset.emoji === state.selectedHouseEmoji));
+}
+async function saveHouse() {
+  const name = document.getElementById('house-name-input').value.trim();
+  if (!name) { showToast('名前を入力してください'); return; }
+  if (state.editingHouseId !== null) {
+    const house = state.houses.find(h => h.id === state.editingHouseId);
+    const updated = { ...house, name, emoji: state.selectedHouseEmoji };
+    await dbUpdate('houses', updated);
+    const idx = state.houses.findIndex(h => h.id === state.editingHouseId);
+    if (idx >= 0) state.houses[idx] = updated;
+    showToast('更新しました');
+    closeHouseModal();
+    if (document.getElementById('floors-screen').classList.contains('active')) {
+      document.getElementById('fs-house-title').textContent = (updated.emoji||'🏡') + ' ' + updated.name;
+    } else {
+      renderHousesList();
+    }
+  } else {
+    const house = { name, emoji: state.selectedHouseEmoji, createdAt: new Date().toISOString() };
+    const id = await dbAdd('houses', house); house.id = id;
+    state.houses.push(house);
+    showToast('家を追加しました！');
+    closeHouseModal();
+    await showFloorsScreen(id);
+  }
+}
+function confirmDeleteHouse(houseId) {
+  const houseFloors = state.allFloors.filter(f => f.houseId === houseId);
+  const floorIds = houseFloors.map(f => f.id);
+  const itemCount = state.allItems.filter(i => floorIds.includes(i.floorId)).length;
+  showConfirm('この家を削除しますか？',
+    `${houseFloors.length}フロアと${itemCount}件の物が全て削除されます。元に戻せません。`,
+    async () => {
+      for (const floor of houseFloors) await deleteFloorData(floor.id);
+      await dbDelete('houses', houseId);
+      state.houses = state.houses.filter(h => h.id !== houseId);
+      closeHouseModal();
+      showToast('削除しました');
+      showHousesScreen();
+    });
+}
+
+// ============================================================
+// フロアの管理
+// ============================================================
+function openAddFloorModal() {
+  state.editingFloorId = null;
+  state.selectedFloorFpData = null;
+  const floorNum = state.allFloors.filter(f => f.houseId === state.activeHouseId).length + 1;
+  document.getElementById('floor-modal-title').textContent = '階を追加';
+  document.getElementById('floor-name-input').value = floorNum + '階';
+  document.getElementById('floor-delete-btn').style.display = 'none';
+  refreshFpPicker();
+  document.getElementById('floor-modal').classList.add('open');
+  setTimeout(() => {
+    const inp = document.getElementById('floor-name-input');
+    inp.focus(); inp.select();
+  }, 350);
+}
+
+function openEditFloorModal(floorId) {
+  const floor = state.allFloors.find(f => f.id === floorId); if (!floor) return;
+  state.editingFloorId = floorId;
+  state.selectedFloorFpData = floor.floorplan || null;
+  document.getElementById('floor-modal-title').textContent = '階を編集';
+  document.getElementById('floor-name-input').value = floor.name;
+  document.getElementById('floor-delete-btn').style.display = 'block';
+  refreshFpPicker();
+  document.getElementById('floor-modal').classList.add('open');
+  setTimeout(() => document.getElementById('floor-name-input').focus(), 350);
+}
+function closeFloorModal() { document.getElementById('floor-modal').classList.remove('open'); state.selectedFloorFpData = null; }
+function onFloorFpSelected(e) {
+  const f = e.target.files[0]; if (!f) return;
+  resizeImage(f, 1600, 1200, d => { state.selectedFloorFpData = d; refreshFpPicker(); e.target.value = ''; });
+}
+function refreshFpPicker() {
+  const p = document.getElementById('fp-picker');
+  const saveBtn = document.querySelector('#floor-modal .btn-save');
+  const isEdit = state.editingFloorId !== null;
+  const hasFp  = !!state.selectedFloorFpData;
+
+  if (hasFp) {
+    p.classList.add('has-fp');
+    p.innerHTML = `<img src="${state.selectedFloorFpData}" alt="間取り図"><div class="fp-overlay">📷 タップして変更</div>`;
+  } else {
+    p.classList.remove('has-fp');
+    const hint = isEdit ? '（任意）' : '（必須）';
+    p.innerHTML = `<div class="fp-picker-placeholder"><div class="pp-icon">🗺️</div><div class="pp-text">タップして間取り図を追加${hint}</div></div>`;
+  }
+
+  // 新規追加時は間取り図が選択されるまで保存ボタンを無効化
+  if (saveBtn) {
+    const canSave = isEdit || hasFp;
+    saveBtn.disabled = !canSave;
+    saveBtn.style.opacity = canSave ? '' : '0.4';
+    saveBtn.style.cursor  = canSave ? '' : 'not-allowed';
+  }
+}
+async function saveFloor() {
+  const name = document.getElementById('floor-name-input').value.trim();
+  if (!name) { showToast('名前を入力してください'); return; }
+  if (state.editingFloorId !== null) {
+    const floor = state.allFloors.find(f => f.id === state.editingFloorId);
+    const updated = { ...floor, name, floorplan: state.selectedFloorFpData !== undefined ? state.selectedFloorFpData : floor.floorplan };
+    await dbUpdate('floors', updated);
+    const idx = state.allFloors.findIndex(f => f.id === state.editingFloorId);
+    if (idx >= 0) state.allFloors[idx] = updated;
+    if (state.activeFloor && state.activeFloor.id === state.editingFloorId) {
+      state.activeFloor = updated;
+      state.floorplanData = updated.floorplan;
+    }
+    showToast('更新しました');
+    closeFloorModal();
+    renderFloorsList();
+  } else {
+    const floors = state.allFloors.filter(f => f.houseId === state.activeHouseId);
+    const floor = { houseId: state.activeHouseId, name, order: floors.length, floorplan: state.selectedFloorFpData || null, createdAt: new Date().toISOString() };
+    const id = await dbAdd('floors', floor); floor.id = id;
+    state.allFloors.push(floor);
+    showToast('階を追加しました！');
+    closeFloorModal();
+    renderFloorsList();
+  }
+  state.selectedFloorFpData = null;
+}
+function confirmDeleteFloor(floorId) {
+  const itemCount = state.allItems.filter(i => i.floorId === floorId).length;
+  showConfirm('この階を削除しますか？',
+    itemCount > 0 ? `${itemCount}件の物も全て削除されます。元に戻せません。` : '元に戻せません。',
+    async () => {
+      await deleteFloorData(floorId);
+      closeFloorModal();
+      showToast('削除しました');
+      renderFloorsList();
+    });
+}
+async function deleteFloorData(floorId) {
+  const items = state.allItems.filter(i => i.floorId === floorId);
+  for (const item of items) await dbDelete('items', item.id);
+  state.allItems = state.allItems.filter(i => i.floorId !== floorId);
+  state.items = state.items.filter(i => i.floorId !== floorId);
+  await dbDelete('floors', floorId);
+  state.allFloors = state.allFloors.filter(f => f.id !== floorId);
+}
+
+// ============================================================
+// 検索
+// ============================================================
+let fuse = null, searchTimer = null;
+function buildFuse() { fuse = new Fuse(state.items, { keys:['name','description','tags'], threshold:0.4, includeScore:true, ignoreLocation:true, minMatchCharLength:1 }); }
+function onSearchFocus() {
+  buildFuse();
+  document.getElementById('items-list-overlay').style.display = 'none';
+  document.getElementById('search-overlay').style.display = 'block';
+  const q = document.getElementById('search-input').value;
+  q.trim() ? doSearch(q) : showAllInSearch();
+}
+function onSearchInput(v) {
+  clearTimeout(searchTimer);
+  document.getElementById('clear-search').style.display = v ? 'block' : 'none';
+  document.getElementById('items-list-overlay').style.display = 'none';
+  document.getElementById('search-overlay').style.display = 'block';
+  searchTimer = setTimeout(() => v.trim() ? doSearch(v) : showAllInSearch(), 150);
+}
+function showAllInSearch() {
+  renderSearchResults(state.items, '');
+  document.getElementById('search-result-count').textContent = `全 ${state.items.length} 件`;
+}
+function doSearch(q) {
+  buildFuse();
+  const res = fuse.search(q).map(r => r.item);
+  renderSearchResults(res, q);
+  document.getElementById('search-result-count').textContent = `「${escHtml(q)}」の結果：${res.length} 件`;
+}
+function renderSearchResults(items, q) {
+  const c = document.getElementById('search-results');
+  if (!items.length) { c.innerHTML = `<div class="search-empty"><div class="se-icon">🔍</div><div>「${escHtml(q)}」は見つかりませんでした</div></div>`; return; }
+  c.innerHTML = items.map(item => {
+    const color = getPinColor(item);
+    const thumb = item.photo ? `<img class="search-item-thumb" src="${item.photo}">` : `<div class="search-item-thumb-ph">${item.emoji||'📦'}</div>`;
+    const path = item.parentId != null ? getItemPath(item.id) : null;
+    const pathHtml = path && path.length > 1 ? `<div class="search-item-path">📍 ${escHtml(path.slice(0,-1).join(' › '))}</div>` : '';
+    const cc = getChildCount(item.id);
+    const cb = cc > 0 ? ` <span style="font-size:10px;background:var(--accent);color:#000;border-radius:4px;padding:1px 4px;">📂${cc}</span>` : '';
+    return `<div class="search-item" onclick="goToItem(${item.id})">${thumb}<div class="search-item-info"><div class="search-item-name">${escHtml(item.name)}${cb}</div><div class="search-item-meta"><span style="color:${color}">●</span> ${item.description ? escHtml(item.description).substring(0,40) : '詳細なし'}</div>${pathHtml}</div></div>`;
+  }).join('');
+}
+function goToItem(id) {
+  const item = state.items.find(i => i.id === id); if (!item) return;
+  clearSearch(); closeSearch();
+  if (item.parentId != null) {
+    const stack = [];
+    let cur = state.items.find(i => i.id === item.parentId);
+    while (cur) { stack.unshift(cur.id); cur = cur.parentId != null ? state.items.find(i => i.id === cur.parentId) : null; }
+    state.containerStack = stack; updateMapView();
+  } else { state.containerStack = []; updateMapView(); }
+  setTimeout(() => { showItemDetail(id); const pin = document.querySelector(`.pin[data-id="${id}"]`); if (pin) pin.classList.add('highlighted'); }, 200);
+}
+function clearSearch() { document.getElementById('search-input').value = ''; document.getElementById('clear-search').style.display = 'none'; }
+function closeSearch() { document.getElementById('search-overlay').style.display = 'none'; document.getElementById('search-input').blur(); }
+
+// ============================================================
+// アイテム一覧
+// ============================================================
+function showItemsList() {
+  setFooterMode('list'); closeSearch();
+  // タブを一覧に戻す
+  switchListTab('flat');
+  const content = document.getElementById('items-list-content');
+  const all = state.items;
+  document.getElementById('items-count-badge').textContent = `(${all.length}件)`;
+  if (!all.length) {
+    content.innerHTML = `<div class="item-list-empty"><div class="ile-icon">📦</div><div>まだ物が登録されていません</div><div style="font-size:12px;margin-top:8px;color:var(--text-muted)">＋ボタンをタップして追加しましょう</div></div>`;
+  } else {
+    function row(item, showPath) {
+      const cc = getChildCount(item.id);
+      const cb = cc > 0 ? `<div class="thumb-has-children">📂${cc}</div>` : '';
+      const th = item.photo ? `<img class="item-list-thumb" src="${item.photo}">` : `<div class="item-list-thumb-ph">${item.emoji||'📦'}</div>`;
+      const tw = `<div style="position:relative;flex-shrink:0;">${th}${cb}</div>`;
+      const path = showPath ? getItemPath(item.id) : [];
+      const meta = showPath && path.length > 1 ? `<div class="item-list-meta" style="color:var(--primary)">📍 ${escHtml(path.slice(0,-1).join(' › '))}</div>` : `<div class="item-list-meta">${item.description ? escHtml(item.description).substring(0,40) : '詳細なし'}</div>`;
+      return `<div class="item-list-entry" onclick="goToItemFromList(${item.id})">${tw}<div class="item-list-info"><div class="item-list-name">${escHtml(item.name)}</div>${meta}</div><span style="color:var(--text-muted);font-size:18px;">›</span></div>`;
+    }
+    const top = all.filter(i => !i.parentId);
+    const sub = all.filter(i => i.parentId != null);
+    let html = '';
+    if (top.length) { html += `<div style="padding:10px 16px 4px;font-size:12px;font-weight:700;color:var(--primary);letter-spacing:0.05em;">マップ上の物 (${top.length}件)</div>`; top.forEach(i => html += row(i, false)); }
+    if (sub.length) { html += `<div style="padding:10px 16px 4px;font-size:12px;font-weight:700;color:#8e44ad;letter-spacing:0.05em;">収納内の物 (${sub.length}件)</div>`; sub.forEach(i => html += row(i, true)); }
+    content.innerHTML = html;
+  }
+  document.getElementById('items-list-overlay').style.display = 'flex';
+}
+function goToItemFromList(id) { hideItemsList(); setTimeout(() => goToItem(id), 100); }
+function hideItemsList() {
+  document.getElementById('items-list-overlay').style.display = 'none';
+  setFooterMode('map');
+}
+
+// ============================================================
+// フッターモード切替
+// ============================================================
+function setFooterMode(mode) {
+  const mapMode = document.getElementById('footer-map-mode');
+  const listMode = document.getElementById('footer-list-mode');
+  const fabBtn = document.getElementById('fab-btn');
+  const dragBtn = document.getElementById('pin-drag-btn');
+
+  if (mode === 'list') {
+    mapMode.style.display = 'none';
+    listMode.style.display = 'flex';
+    fabBtn.style.display = 'none';
+    dragBtn.style.display = 'none';
+    // 「直前の物に戻る」ボタンの表示制御
+    const lastBtn = document.getElementById('footer-lastitem-btn');
+    if (state.lastViewedItemId && state.items.find(i => i.id === state.lastViewedItemId)) {
+      const item = state.items.find(i => i.id === state.lastViewedItemId);
+      lastBtn.style.display = 'flex';
+      const lbl = lastBtn.querySelector('.fb-label');
+      if (lbl && item) {
+        const shortName = item.name.length > 6 ? item.name.substring(0, 6) + '…' : item.name;
+        lbl.textContent = '「' + shortName + '」に戻る';
+      }
+    } else {
+      lastBtn.style.display = 'none';
+    }
+  } else {
+    mapMode.style.display = 'flex';
+    listMode.style.display = 'none';
+    fabBtn.style.display = 'flex';
+    dragBtn.style.display = 'flex';
+    updateBackButton();
+  }
+}
+
+function updateBackButton() {
+  const backBtn = document.getElementById('footer-back-btn');
+  if (state.lastViewedItemId && state.items.find(i => i.id === state.lastViewedItemId)) {
+    backBtn.style.display = 'flex';
+  } else {
+    backBtn.style.display = 'none';
+  }
+}
+
+function goBackToLastViewed() {
+  if (!state.lastViewedItemId) return;
+  const item = state.items.find(i => i.id === state.lastViewedItemId);
+  if (!item) return;
+  if (state.lastViewedStack) {
+    state.containerStack = [...state.lastViewedStack];
+    updateMapView();
+  }
+  setTimeout(() => { showItemDetail(state.lastViewedItemId); }, 200);
+}
+
+function returnToMapFromList() {
+  hideItemsList();
+  state.containerStack = [];
+  exitAddMode(); exitDragMode(); updateMapView();
+}
+
+function returnToLastItemFromList() {
+  if (!state.lastViewedItemId) return;
+  hideItemsList();
+  const item = state.items.find(i => i.id === state.lastViewedItemId);
+  if (!item) return;
+  if (state.lastViewedStack) {
+    state.containerStack = [...state.lastViewedStack];
+    updateMapView();
+  }
+  setTimeout(() => { showItemDetail(state.lastViewedItemId); }, 200);
+}
+
+// ============================================================
+// 一覧タブ切り替え & ツリー表示
+// ============================================================
+function switchListTab(tab) {
+  const flatTab = document.getElementById('tab-flat-list');
+  const treeTab = document.getElementById('tab-tree-view');
+  const flatContent = document.getElementById('items-list-content');
+  const treeContent = document.getElementById('items-tree-content');
+  if (tab === 'flat') {
+    flatTab.classList.add('active');
+    treeTab.classList.remove('active');
+    flatContent.style.display = 'block';
+    treeContent.style.display = 'none';
+  } else {
+    flatTab.classList.remove('active');
+    treeTab.classList.add('active');
+    flatContent.style.display = 'none';
+    treeContent.style.display = 'block';
+    renderTreeView();
+  }
+}
+
+function renderTreeView() {
+  const treeContent = document.getElementById('items-tree-content');
+  const all = state.items;
+  if (!all.length) {
+    treeContent.innerHTML = `<div class="item-list-empty"><div class="ile-icon">🌳</div><div>まだ物が登録されていません</div></div>`;
+    return;
+  }
+  // ルートアイテム（parentIdがnullまたはundefined）
+  const roots = all.filter(i => !i.parentId);
+  let html = '';
+  if (roots.length === 0) {
+    treeContent.innerHTML = `<div class="item-list-empty"><div class="ile-icon">🌳</div><div>ツリーのルートアイテムがありません</div></div>`;
+    return;
+  }
+  roots.forEach(item => { html += buildTreeNode(item, all, 0); });
+  treeContent.innerHTML = html;
+}
+
+function buildTreeNode(item, allItems, depth) {
+  const children = allItems.filter(i => i.parentId === item.id);
+  const hasChildren = children.length > 0;
+  const icon = item.emoji || '📦';
+  const depthColors = ['var(--primary)', '#10b981', '#f59e0b'];
+  const depthLabels = ['Lay1', 'Lay2', 'Lay3'];
+  const color = depthColors[depth] || '#888';
+  const label = depthLabels[depth] || '';
+  const toggleClass = hasChildren ? '' : ' empty';
+
+  let html = `<div class="tree-node tree-depth-${depth}">`;
+  html += `<div class="tree-node-row" onclick="${hasChildren ? `toggleTreeNode(this)` : `goToItemFromList(${item.id})`}">`;
+  html += `<div class="tree-toggle${toggleClass}" style="color:${color}">▶</div>`;
+  html += `<div class="tree-node-icon">${icon}</div>`;
+  html += `<div class="tree-node-name" style="color:${depth > 0 ? color : 'var(--text)'}">${escHtml(item.name)}</div>`;
+  if (hasChildren) {
+    html += `<div class="tree-node-badge">${children.length}件</div>`;
+  }
+  html += `<span style="color:var(--text-muted);font-size:14px;flex-shrink:0;cursor:pointer;" onclick="event.stopPropagation();goToItemFromList(${item.id})">›</span>`;
+  html += `</div>`;
+
+  if (hasChildren) {
+    html += `<div class="tree-children">`;
+    children.forEach(child => { html += buildTreeNode(child, allItems, depth + 1); });
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function toggleTreeNode(rowEl) {
+  const node = rowEl.parentElement;
+  const children = node.querySelector('.tree-children');
+  const toggle = rowEl.querySelector('.tree-toggle');
+  if (children) {
+    const isOpen = children.classList.contains('open');
+    children.classList.toggle('open');
+    toggle.classList.toggle('expanded');
+  }
+}
+
+function showMapView() { state.containerStack = []; exitAddMode(); exitDragMode(); hideAllOverlays(); updateMapView(); setFooterMode('map'); }
+function hideAllOverlays() {
+  ['search-overlay','items-list-overlay'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  setFooterMode('map');
+}
+
+// ============================================================
+// 間取り図ピッカー（ヘッダーの📐ボタンから開く）
+// ============================================================
+function openFloorFpPicker() {
+  document.getElementById('floor-fp-change-input').click();
+}
+
+// ============================================================
+// エクスポート / インポート
+// ============================================================
+async function exportData() {
+  const allHouses = await dbGetAll('houses');
+  const allFloors = await dbGetAll('floors');
+  const allItems = await dbGetAll('items');
+  const json = JSON.stringify({ version:3, exportedAt:new Date().toISOString(), houses:allHouses, floors:allFloors, items:allItems }, null, 2);
+
+  if (CapFilesystem && CapShare) {
+    try {
+      const fileName = `homemap-backup-${Date.now()}.json`;
+      const writeResult = await CapFilesystem.writeFile({
+        path: fileName,
+        data: json,
+        directory: 'CACHE',
+        encoding: 'utf8'
+      });
+      const uri = writeResult.uri;
+      await CapShare.share({ title: 'ホームマップバックアップ', url: uri, dialogTitle: 'エクスポート先を選択' });
+      showToast('エクスポートしました！');
+    } catch(e) {
+      if (e.message && !e.message.includes('cancel')) showToast('エクスポートに失敗しました');
+    }
+  } else {
+    const blob = new Blob([json], { type:'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `homemap-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href);
+    showToast('エクスポートしました！');
+  }
+}
+async function importData(e) {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    showConfirm('データをインポート',
+      '現在のデータは置き換えられます。続行しますか？',
+      async () => {
+        await applyDataFromObject(d);
+        currentFileName = null;
+        showToast('読み込みました！');
+        if (state.houses.length === 1) {
+          const hFloors = state.allFloors.filter(fl => fl.houseId === state.houses[0].id);
+          if (hFloors.length === 1) { state.activeHouseId = state.houses[0].id; await showFloorMap(hFloors[0].id); }
+          else showFloorsScreen(state.houses[0].id);
+        } else showHousesScreen();
+      },
+      { okLabel: '📥 読み込む', okClass: 'confirm-open' });
+  } catch { showToast('ファイルの読み込みに失敗しました'); }
+  e.target.value = '';
+}
+async function confirmClearAll() {
+  showConfirm('全データを削除', '全ての家・階・物が消去されます。元に戻せません。', async () => {
+    await dbClear('items'); await dbClear('floors'); await dbClear('houses'); await dbClear('settings');
+    state.houses = []; state.allFloors = []; state.allItems = []; state.items = [];
+    state.activeHouseId = null; state.activeFloor = null; state.floorplanData = null;
+    showHousesScreen();
+    showToast('全データを削除しました');
+  });
+}
+
+// ============================================================
+// ファイル操作（モバイル版 — Capacitor Filesystem + Share）
+// ============================================================
+
+// 全データをJSONオブジェクトとして収集
+async function collectAllData() {
+  const houses = await dbGetAll('houses');
+  const floors = await dbGetAll('floors');
+  const items  = await dbGetAll('items');
+  return { version: 3, appName: 'ホームマップ', savedAt: new Date().toISOString(), houses, floors, items };
+}
+
+// JSONデータをDBに書き込む
+async function applyDataFromObject(d) {
+  await dbClear('items'); await dbClear('floors'); await dbClear('houses');
+  if (d.version === 3 && d.houses) {
+    for (const h  of (d.houses||[]))  await dbUpdate('houses', h);
+    for (const fl of (d.floors||[]))  await dbUpdate('floors', fl);
+    for (const it of (d.items||[]))   await dbUpdate('items',  it);
+  } else {
+    const houseId = await dbAdd('houses', { name:'自宅', emoji:'🏡', createdAt: new Date().toISOString() });
+    const floorId = await dbAdd('floors', { houseId, name:'1階', order:0, floorplan: d.floorplan||null, createdAt: new Date().toISOString() });
+    for (const it of (d.items||[])) { const {id,...r} = it; await dbAdd('items', {...r, floorId}); }
+  }
+  state.houses    = await dbGetAll('houses');
+  state.allFloors = await dbGetAll('floors');
+  state.allItems  = await dbGetAll('items');
+}
+
+// 新規作成
+async function newProject() {
+  showConfirm('新規作成', '現在のデータは消去されます。保存が必要な場合はキャンセルして保存してください。', async () => {
+    await dbClear('items'); await dbClear('floors'); await dbClear('houses');
+    state.houses = []; state.allFloors = []; state.allItems = []; state.items = [];
+    state.activeHouseId = null; state.activeFloor = null; state.floorplanData = null;
+    currentFileName = null;
+    showHousesScreen();
+    showToast('📄 新規プロジェクトを作成しました');
+  }, { okLabel: '🆕 新規作成', okClass: 'confirm-new' });
+}
+
+// 保存（Capacitor Filesystem + Share）
+async function saveProject() {
+  try {
+    const data = await collectAllData();
+    const json = JSON.stringify(data, null, 2);
+    const firstHouse = (state.houses && state.houses.length > 0) ? state.houses[0] : null;
+    const baseName = firstHouse ? firstHouse.name.replace(/\s+/g, '_') : 'ホームマップデータ';
+    const fileName = currentFileName || (baseName + '.hmj');
+
+    if (CapFilesystem) {
+      try {
+        await CapFilesystem.writeFile({
+          path: 'HomeMap/' + fileName,
+          data: json,
+          directory: 'DOCUMENTS',
+          encoding: 'utf8',
+          recursive: true
+        });
+        currentFileName = fileName;
+        showToast('💾 保存しました: Documents/HomeMap/' + fileName);
+      } catch(e) {
+        console.error('Save error:', e);
+        showToast('保存に失敗しました: ' + e.message);
+      }
+    } else {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      currentFileName = fileName;
+      showToast('💾 ダウンロードしました');
+    }
+  } catch(e) {
+    console.error('Save error:', e);
+    showToast('保存に失敗しました');
+  }
+}
+
+// 名前を付けて保存（共有経由）
+async function saveProjectAs() {
+  try {
+    const data = await collectAllData();
+    const json = JSON.stringify(data, null, 2);
+    const firstHouse = (state.houses && state.houses.length > 0) ? state.houses[0] : null;
+    const baseName = firstHouse ? firstHouse.name.replace(/\s+/g, '_') : 'ホームマップデータ';
+    const fileName = baseName + '.hmj';
+
+    if (CapFilesystem && CapShare) {
+      try {
+        const writeResult = await CapFilesystem.writeFile({
+          path: 'HomeMap/' + fileName,
+          data: json,
+          directory: 'CACHE',
+          encoding: 'utf8',
+          recursive: true
+        });
+        const uri = writeResult.uri || ('file:///data/user/0/jp.homemap.app/cache/HomeMap/' + fileName);
+        await CapShare.share({
+          title: 'ホームマップデータ',
+          text: 'ホームマップのデータファイル',
+          url: uri,
+          dialogTitle: '保存先を選択'
+        });
+        currentFileName = fileName;
+        showToast('💾 共有しました');
+      } catch(e) {
+        if (e.message && !e.message.includes('cancel')) {
+          console.error('Share error:', e);
+          await saveProject();
+        }
+      }
+    } else {
+      await saveProject();
+    }
+  } catch(e) {
+    console.error('SaveAs error:', e);
+    showToast('保存に失敗しました');
+  }
+}
+
+// ファイルを開く（input type=file）
+async function openProjectFile() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.hmj,.json';
+  input.onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      const d = JSON.parse(text);
+      showConfirm('ファイルを開く',
+        '現在のデータは置き換えられます。続行しますか？',
+        async () => {
+          await applyDataFromObject(d);
+          currentFileName = f.name;
+          showToast('📂 ファイルを開きました');
+          if (state.houses.length === 1) {
+            const hFloors = state.allFloors.filter(fl => fl.houseId === state.houses[0].id);
+            if (hFloors.length === 1) { state.activeHouseId = state.houses[0].id; await showFloorMap(hFloors[0].id); }
+            else showFloorsScreen(state.houses[0].id);
+          } else showHousesScreen();
+        },
+        { okLabel: '📂 開く', okClass: 'confirm-open' });
+    } catch(err) {
+      showToast('ファイルの読み込みに失敗しました');
+    }
+  };
+  input.click();
+}
+
+// ============================================================
+// トースト / 確認ダイアログ
+// ============================================================
+let toastTimer;
+function showToast(msg) { const el = document.getElementById('toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2500); }
+let confirmCb;
+function showConfirm(title, msg, cb, opts) {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-msg').textContent = msg;
+  const btn = document.getElementById('confirm-ok-btn');
+  btn.textContent = (opts && opts.okLabel) ? opts.okLabel : '削除';
+  btn.className   = 'confirm-ok' + ((opts && opts.okClass) ? ' ' + opts.okClass : '');
+  confirmCb = cb;
+  document.getElementById('confirm-dialog').classList.add('open');
+}
+function closeConfirm() { document.getElementById('confirm-dialog').classList.remove('open'); confirmCb = null; }
+document.getElementById('confirm-ok-btn').addEventListener('click', () => { if (confirmCb) confirmCb(); closeConfirm(); });
+
+// ============================================================
+// モーダルをスワイプで閉じる
+// ============================================================
+document.querySelectorAll('.modal-sheet').forEach(sheet => {
+  let sy = 0;
+  sheet.addEventListener('touchstart', e => sy = e.touches[0].clientY, { passive: true });
+  sheet.addEventListener('touchend', e => {
+    if (e.changedTouches[0].clientY - sy > 80) {
+      const ov = sheet.closest('.modal-overlay');
+      if (ov) {
+        ov.classList.remove('open');
+        if (ov.id === 'add-modal') exitAddMode();
+        if (ov.id === 'floor-modal') state.selectedFloorFpData = null;
+      }
+    }
+  }, { passive: true });
+});
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+function escHtml(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ============================================================
+// アプリ起動
+// ============================================================
+
+// 3秒以内にinitが完了しない場合の緊急フォールバック（白画面防止）
+const _emergencyTimer = setTimeout(() => {
+  const ls = document.getElementById('loading-screen');
+  if (ls) { ls.style.opacity='0'; ls.style.pointerEvents='none'; setTimeout(()=>{ls.style.display='none';},500); }
+  try { if (!document.querySelector('.screen.active')) showHousesScreen(); } catch(e) {}
+  console.warn('Emergency fallback triggered after 3s timeout');
+}, 3000);
+
+async function _startApp() {
+  try {
+    await init();
+  } finally {
+    clearTimeout(_emergencyTimer);
+  }
+}
+
+_startApp();
+</script>
+</body>
+</html>
