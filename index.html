@@ -24,6 +24,13 @@
   window.addEventListener('unhandledrejection', function(e) {
     console.error('Unhandled promise rejection:', e.reason);
   });
+  // モバイルブラウザの実際の表示高さを設定（100vhがアドレスバーを含む問題の対策）
+  function setAppHeight() {
+    document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+  }
+  window.addEventListener('resize', setAppHeight);
+  window.addEventListener('orientationchange', function() { setTimeout(setAppHeight, 100); });
+  setAppHeight();
   </script>
   <title>ホームマップ</title>
   <!-- PWA manifest 除去（Capacitorネイティブアプリのため不要） -->
@@ -102,10 +109,11 @@ return Fuse;
       font-size: 16px;
     }
 
-    #app { display: flex; flex-direction: column; height: 100dvh; height: 100vh; overflow: hidden;
+    #app { display: flex; flex-direction: column; overflow: hidden;
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      height: calc(var(--app-height, 100vh));
       padding-top: env(safe-area-inset-top, 0px);
       padding-bottom: env(safe-area-inset-bottom, 0px);
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     }
 
     .screen { display: none; flex-direction: column; flex: 1; overflow: hidden; }
